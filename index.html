@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt Collector Core</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding-bottom: 75px; }
+        .view { display: none; }
+        .view.active { display: block; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+    <section id="view-login" class="view min-h-screen flex flex-col justify-center items-center p-6 bg-slate-900 text-white">
+        <div class="w-full max-w-md space-y-6 bg-slate-800 p-6 rounded-2xl shadow-xl border border-slate-700">
+            <div class="text-center space-y-1">
+                <span class="text-4xl">🔐</span>
+                <h1 class="text-xl font-bold tracking-tight">Receipt Hub Gateway</h1>
+                <p class="text-xs text-slate-400">Authorized Personnel Session Verification</p>
+            </div>
+            
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Username</label>
+                    <input type="text" id="login-username" class="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Enter username">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Password</label>
+                    <input type="password" id="login-password" class="w-full p-3 bg-slate-900 border border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="••••••••">
+                </div>
+                <div id="login-error" class="hidden text-xs text-red-400 font-medium bg-red-950/50 p-2.5 rounded-lg border border-red-900 text-center">
+                    Invalid security credentials. Please try again.
+                </div>
+                <button type="submit" class="w-full bg-blue-600 text-white font-semibold p-3 rounded-xl shadow-md active:bg-blue-700 transition text-sm">
+                    Verify Identity
+                </button>
+            </form>
+        </div>
+    </section>
+
+    <div id="app-shell" class="block">
+        
+        <header class="bg-blue-600 text-white p-4 shadow-md sticky top-0 z-40 flex justify-between items-center">
+            <h1 class="text-xl font-bold tracking-tight" id="header-title">Dashboard</h1>
+            <button onclick="activateLoginGateway()" class="text-xs bg-blue-700 hover:bg-blue-800 px-2.5 py-1 rounded-lg font-medium transition">Lock Hub</button>
+        </header>
+
+        <main class="p-4 max-w-md mx-auto w-full space-y-4">
+
+            <section id="view-dashboard" class="view active space-y-5">
+                
+                <div class="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 space-y-4">
+                    <h2 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Spending Analytics</h2>
+                    
+                    <div class="space-y-1">
+                        <div class="flex justify-between text-sm font-medium">
+                            <span class="text-gray-700">Current Month (July)</span>
+                            <span class="font-bold text-blue-600" id="stat-current-total">$0.00</span>
+                        </div>
+                        <div class="w-full bg-gray-100 rounded-full h-3.5 overflow-hidden">
+                            <div id="progress-current" class="bg-blue-600 h-3.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+                        </div>
+                        <p class="text-[11px] text-gray-400 text-right">Target Budget Reference: $1,500.00</p>
+                    </div>
+
+                    <div class="space-y-1 border-t border-gray-50 pt-2">
+                        <div class="flex justify-between text-sm font-medium">
+                            <span class="text-gray-500">Previous Month (June)</span>
+                            <span class="font-semibold text-gray-700" id="stat-prev-total">$0.00</span>
+                        </div>
+                        <div class="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                            <div id="progress-prev" class="bg-gray-500 h-2.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 space-y-3">
+                    <div class="relative">
+                        <input type="text" id="search-box" placeholder="Search merchant, folder, or category..." class="w-full pl-9 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                        <span class="absolute left-3 top-3 text-gray-400 text-sm">🔍</span>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-[11px] font-bold text-gray-400 uppercase mb-1">Start Date</label>
+                            <input type="date" id="filter-start-date" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-bold text-gray-400 uppercase mb-1">End Date</label>
+                            <input type="date" id="filter-end-date" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs">
+                        </div>
+                    </div>
+                    <div class="flex gap-1.5 overflow-x-auto pb-1" id="filter-fast-categories"></div>
+                </div>
+
+                <div class="space-y-2">
+                    <div class="flex justify-between items-center px-1">
+                        <h3 class="text-sm font-bold text-gray-700">Matched Bookings / Entries</h3>
+                        <span class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full font-medium" id="entry-count-tag">0 entries</span>
+                    </div>
+                    <div id="entries-list-container" class="space-y-2.5"></div>
+                </div>
+            </section>
+
+            <section id="view-scan" class="view space-y-4">
+                <div class="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 space-y-4">
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">Select Target Directory</label>
+                        <select id="directory-select" class="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-sm">
+                            <option value="Personal">Personal</option>
+                            <option value="Work">Work / Business Expenses</option>
+                            <option value="Investments">Investments</option>
+                            <option value="Others">Others</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">Capture / Upload Receipts</label>
+                        <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer bg-gray-50 hover:bg-gray-100 transition">
+                            <div class="flex flex-col items-center justify-center pt-5 pb-6 text-center px-4">
+                                <span class="text-3xl mb-1">📷</span>
+                                <p class="text-sm font-medium text-blue-600">Select Multiple Photos</p>
+                                <p class="text-xs text-gray-400 mt-1">Images are automatically split into separate tracking entries</p>
+                            </div>
+                            <input id="receipt-input" type="file" accept="image/*" multiple class="hidden" />
+                        </label>
+                    </div>
+
+                    <div id="ocr-loading-hud" class="hidden p-4 bg-blue-50 border border-blue-200 rounded-xl flex items-center gap-3">
+                        <div class="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
+                        <div class="text-xs text-blue-800 font-medium">
+                            <p class="font-bold">Executing Tesseract OCR Content Sweep...</p>
+                            <p id="ocr-progress-text" class="text-blue-600 font-mono mt-0.5">Initializing language matrix models...</p>
+                        </div>
+                    </div>
+
+                    <div id="queue-container" class="hidden space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Multi-Page Queue Pipeline (<span id="queue-count">0</span> items remaining)</span>
+                        </div>
+                        <div id="preview-grid" class="grid grid-cols-4 gap-2 bg-gray-50 p-2 rounded-xl"></div>
+                        <button id="process-btn" class="w-full bg-green-600 text-white font-semibold p-3 rounded-xl shadow-xs active:bg-green-700 transition text-sm">
+                            ⚡ Run Image Scan & Extract Text
+                        </button>
+                    </div>
+                </div>
+
+                <div id="step-verify" class="hidden bg-white p-5 rounded-2xl shadow-xs border border-gray-100 space-y-4">
+                    <div class="bg-amber-50 border border-amber-200 p-2 rounded-xl flex items-center justify-between">
+                        <h3 class="text-xs font-bold text-amber-700">Verifying Current Queue Segment</h3>
+                        <span class="text-[10px] font-mono bg-amber-200/60 text-amber-800 px-1.5 py-0.5 rounded" id="verify-batch-index">Item 1</span>
+                    </div>
+
+                    <div class="bg-gray-100 h-40 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200 relative">
+                        <img id="form-receipt-preview" src="" class="object-contain w-full h-full">
+                    </div>
+
+                    <form id="ocr-form" class="space-y-3 text-sm">
+                        <div>
+                            <label class="block font-medium text-gray-600 mb-1">Establishment / Merchant</label>
+                            <input type="text" id="form-merchant" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg" placeholder="(Blank / No clear data detected)">
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block font-medium text-gray-600 mb-1">Date</label>
+                                <input type="date" id="form-date" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg">
+                            </div>
+                            <div>
+                                <label class="block font-medium text-gray-600 mb-1">Category</label>
+                                <select id="form-category" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg"></select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <label class="block font-medium text-gray-600 mb-1">Currency</label>
+                                <input type="text" id="form-currency" value="AUD" class="w-full p-2.5 bg-gray-200 border rounded-lg text-center font-bold" readonly>
+                            </div>
+                            <div class="col-span-2">
+                                <label class="block font-medium text-gray-600 mb-1">Amount</label>
+                                <input type="number" step="0.01" id="form-amount" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg font-bold text-blue-600" placeholder="0.00">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block font-medium text-gray-600 mb-1">Extracted Raw Context Logs</label>
+                            <textarea id="form-notes" rows="3" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg font-mono text-[10px] text-gray-500" placeholder="No matching text block structures found in target document."></textarea>
+                        </div>
+                        <button type="submit" class="w-full bg-blue-600 text-white font-semibold p-3 rounded-xl shadow-xs">
+                            Commit Record & Clear Next Image
+                        </button>
+                    </form>
+                </div>
+            </section>
+
+            <section id="view-analysis" class="view space-y-4">
+                <div class="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 space-y-4">
+                    <h2 class="text-sm font-bold text-gray-800">Time-Frame Performance Matrix</h2>
+                    
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Boundary Scope</label>
+                            <select id="analysis-timeframe" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500">
+                                <option value="monthly">Monthly Breakdown</option>
+                                <option value="quarterly">Quarterly Groups (Q1 - Q4)</option>
+                                <option value="6months">Bi-Annual Half Windows (6 Months)</option>
+                                <option value="yearly">Yearly Total Horizon</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Calendar Year</label>
+                            <select id="analysis-year" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg text-xs font-semibold focus:ring-2 focus:ring-blue-500">
+                                <option value="2026">Fiscal Period 2026</option>
+                                <option value="2025">Fiscal Period 2025</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-2xl shadow-xs border border-gray-100 space-y-3">
+                    <div class="flex justify-between items-center border-b border-gray-50 pb-2">
+                        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Aggregated Spend Distribution</h3>
+                        <span class="text-xs font-bold text-blue-600" id="analysis-total-aggregate">$0.00</span>
+                    </div>
+                    <div id="analysis-chart-container" class="space-y-3.5 pt-1"></div>
+                </div>
+            </section>
+
+            <section id="view-categories" class="view space-y-4">
+                
+                <div class="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 space-y-3">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl">📁</span>
+                        <div>
+                            <h2 class="text-sm font-bold text-gray-800">Cloud Storage Infrastructure</h2>
+                            <p class="text-[11px] text-gray-400">Sync captures natively to a Google Drive account folder</p>
+                        </div>
+                    </div>
+                    
+                    <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-3 text-xs">
+                        <div class="flex justify-between items-center">
+                            <span class="font-semibold text-gray-600">Sync Path Context:</span>
+                            <span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-mono font-bold text-[10px]">/Drive/Receipt Hub/</span>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-[10px] uppercase font-bold text-gray-400 mb-0.5">Google Web Client ID</label>
+                            <input type="text" id="gdrive-client-id" placeholder="Enter your Client ID from Google Console" class="w-full p-2 bg-white border border-gray-200 rounded text-[11px] font-mono">
+                        </div>
+
+                        <div class="flex gap-2 pt-1">
+                            <button type="button" id="gdrive-connect-btn" class="flex-1 bg-slate-900 text-white font-bold py-2 rounded-lg hover:bg-slate-800 transition">
+                                Link Account Connection
+                            </button>
+                            <button type="button" id="gdrive-disconnect-btn" class="hidden bg-red-50 text-red-600 font-semibold px-2 rounded-lg border border-red-200 text-[11px]">
+                                Disconnect
+                            </button>
+                        </div>
+                        <div id="gdrive-status" class="text-[10px] text-gray-400 italic text-center">Local filesystem preservation active. No cloud account linked.</div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-5 rounded-2xl shadow-xs border border-gray-100 space-y-4">
+                    <h2 class="text-sm font-bold text-gray-800">Custom Category Manager</h2>
+                    <form id="add-category-form" class="flex gap-2">
+                        <input type="text" id="new-cat-input" placeholder="e.g., Petrol, Subscriptions" class="flex-1 p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                        <button type="submit" class="bg-blue-600 text-white font-bold px-4 rounded-xl text-sm hover:bg-blue-700">+</button>
+                    </form>
+                    <div class="border-t border-gray-100 pt-3">
+                        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Active Target Categories</h3>
+                        <ul id="categories-list" class="divide-y divide-gray-50"></ul>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+
+        <div id="modal-viewer" class="fixed inset-0 bg-black/60 z-50 flex items-end justify-center hidden">
+            <div class="bg-white w-full max-w-md rounded-t-2xl max-h-[92vh] overflow-y-auto p-5 space-y-4">
+                <div class="flex justify-between items-center border-b border-gray-100 pb-2">
+                    <h3 class="text-lg font-bold text-gray-800">Receipt Profile Detail</h3>
+                    <button id="modal-close-btn" class="text-gray-400 text-xl font-bold p-1">✕</button>
+                </div>
+
+                <div class="bg-gray-100 h-44 rounded-xl flex items-center justify-center overflow-hidden border border-gray-200 relative">
+                    <img id="viewer-img" src="" class="object-contain w-full h-full">
+                </div>
+
+                <form id="edit-form" class="space-y-3 text-sm">
+                    <input type="hidden" id="viewer-entry-id">
+                    <div>
+                        <label class="block font-medium text-gray-500 mb-0.5">Establishment / Merchant</label>
+                        <input type="text" id="viewer-merchant" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg font-medium">
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block font-medium text-gray-500 mb-0.5">Transaction Date</label>
+                            <input type="date" id="viewer-date" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg">
+                        </div>
+                        <div>
+                            <label class="block font-medium text-gray-500 mb-0.5">System Directory</label>
+                            <select id="viewer-directory" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg">
+                                <option value="Personal">Personal</option>
+                                <option value="Work">Work</option>
+                                <option value="Investments">Investments</option>
+                                <option value="Others">Others</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block font-medium text-gray-500 mb-0.5">Category</label>
+                            <select id="viewer-category" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg"></select>
+                        </div>
+                        <div>
+                            <label class="block font-medium text-gray-500 mb-0.5">Amount (AUD)</label>
+                            <input type="number" step="0.01" id="viewer-amount" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg font-bold text-blue-600">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block font-medium text-gray-500 mb-0.5">Notes Context</label>
+                        <textarea id="viewer-notes" rows="2" class="w-full p-2 bg-gray-50 border border-gray-200 rounded-lg"></textarea>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2 pt-2">
+                        <button type="button" id="viewer-delete-btn" class="bg-red-50 text-red-600 font-semibold p-2.5 rounded-xl border border-red-200 active:bg-red-100 transition">Delete</button>
+                        <button type="submit" class="col-span-2 bg-blue-600 text-white font-semibold p-2.5 rounded-xl active:bg-blue-700 transition">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-xl z-40 flex justify-around p-2">
+            <button onclick="switchView('dashboard', 'Dashboard')" class="nav-btn flex flex-col items-center gap-0.5 text-blue-600 text-[10px] font-semibold" id="btn-nav-dashboard">
+                <span class="text-lg">📊</span>Dashboard
+            </button>
+            <button onclick="switchView('scan', 'Capture Portal')" class="nav-btn flex flex-col items-center gap-0.5 text-gray-400 text-[10px] font-medium" id="btn-nav-scan">
+                <span class="text-lg">📷</span>Scan Receipt
+            </button>
+            <button onclick="switchView('analysis', 'Financial Analytics')" class="nav-btn flex flex-col items-center gap-0.5 text-gray-400 text-[10px] font-medium" id="btn-nav-analysis">
+                <span class="text-lg">📈</span>Analysis
+            </button>
+            <button onclick="switchView('categories', 'Settings')" class="nav-btn flex flex-col items-center gap-0.5 text-gray-400 text-[10px] font-medium" id="btn-nav-categories">
+                <span class="text-lg">⚙️</span>Settings
+            </button>
+        </nav>
+    </div>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <script>
+        // Core Storage State Store Emulator
+        let entries = [
+            { id: "1", date: "2026-07-02", merchant: "Officeworks", amount: 142.50, currency: "AUD", category: "Office Supplies", directory: "Work", notes: "Tax documentation baseline.", img: "" },
+            { id: "2", date: "2026-07-01", merchant: "Woolworths", amount: 64.20, currency: "AUD", category: "Meals & Entertainment", directory: "Personal", notes: "Project snacks.", img: "" },
+            { id: "3", date: "2026-06-20", merchant: "AWS Cloud Services", amount: 412.80, currency: "AUD", category: "Software/Subscriptions", directory: "Investments", notes: "Compute resource logs.", img: "" }
+        ];
+
+        let categories = ["Meals & Entertainment", "Office Supplies", "Travel/Transport", "Software/Subscriptions", "Utilities"];
+        let fileQueue = [];
+        let googleTokenResponse = null;
+
+        // AUTH CONTROL DEACTIVATION TOGGLE OVERRIDES
+        function activateLoginGateway() {
+            document.getElementById('app-shell').classList.replace('block', 'hidden');
+            document.getElementById('view-login').classList.add('active');
+        }
+
+        document.getElementById('login-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const user = document.getElementById('login-username').value.trim();
+            const pass = document.getElementById('login-password').value.trim();
+            if (user === 'admin' && pass === 'DJZYdevs') {
+                document.getElementById('view-login').classList.remove('active');
+                document.getElementById('app-shell').classList.replace('hidden', 'block');
+                switchView('dashboard', 'Dashboard');
+            } else {
+                const err = document.getElementById('login-error');
+                err.classList.remove('hidden');
+                setTimeout(() => err.classList.add('hidden'), 4000);
+            }
+        });
+
+        function switchView(viewId, title) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.getElementById(`view-${viewId}`).classList.add('active');
+            document.getElementById('header-title').innerText = title;
+            
+            document.querySelectorAll('.nav-btn').forEach(b => {
+                b.classList.remove('text-blue-600', 'font-semibold');
+                b.classList.add('text-gray-400', 'font-medium');
+            });
+            document.getElementById(`btn-nav-${viewId}`).classList.add('text-blue-600', 'font-semibold');
+            document.getElementById(`btn-nav-${viewId}`).classList.remove('text-gray-400', 'font-medium');
+            
+            renderAll();
+        }
+
+        function renderAll() {
+            renderDashboardMetrics();
+            renderEntriesList();
+            renderCategoryMenus();
+            renderMatrixAnalysis();
+        }
+
+        function renderDashboardMetrics() {
+            let currentTotal = 0; // July 2026
+            let prevTotal = 0;    // June 2026
+
+            entries.forEach(e => {
+                if (!e.date) return;
+                const d = new Date(e.date);
+                if (d.getFullYear() === 2026 && d.getMonth() === 6) currentTotal += parseFloat(e.amount || 0);
+                if (d.getFullYear() === 2026 && d.getMonth() === 5) prevTotal += parseFloat(e.amount || 0);
+            });
+
+            document.getElementById('stat-current-total').innerText = `$${currentTotal.toFixed(2)}`;
+            document.getElementById('stat-prev-total').innerText = `$${prevTotal.toFixed(2)}`;
+            document.getElementById('progress-current').style.width = `${Math.min((currentTotal / 1500) * 100, 100)}%`;
+            document.getElementById('progress-prev').style.width = `${Math.min((prevTotal / 1500) * 100, 100)}%`;
+        }
+
+        function renderEntriesList() {
+            const container = document.getElementById('entries-list-container');
+            const searchVal = document.getElementById('search-box').value.toLowerCase();
+            const startRange = document.getElementById('filter-start-date').value;
+            const endRange = document.getElementById('filter-end-date').value;
+
+            container.innerHTML = '';
+            let filtered = entries.filter(e => {
+                const matchStr = (e.merchant + e.category + e.directory).toLowerCase().includes(searchVal);
+                let matchDate = true;
+                if (startRange && e.date < startRange) matchDate = false;
+                if (endRange && e.date > endRange) matchDate = false;
+                return matchStr && matchDate;
+            });
+
+            document.getElementById('entry-count-tag').innerText = `${filtered.length} entries`;
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<div class="text-center p-6 text-xs text-gray-400">No matching tracking records found.</div>`;
+                return;
+            }
+
+            filtered.forEach(entry => {
+                const card = document.createElement('div');
+                card.className = "bg-white p-3.5 rounded-xl border border-gray-100 shadow-xs flex justify-between items-center cursor-pointer active:scale-[0.99] transition";
+                card.onclick = () => openViewer(entry.id);
+                card.innerHTML = `
+                    <div class="space-y-1">
+                        <div class="flex items-center gap-1.5">
+                            <span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-bold">${entry.directory}</span>
+                            <h4 class="font-bold text-sm text-gray-800">${entry.merchant || 'Unassigned Merchant'}</h4>
+                        </div>
+                        <p class="text-xs text-gray-400">${entry.date || 'No Date'} · <span class="text-blue-500 font-semibold">${entry.category}</span></p>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-sm font-bold text-gray-900">${entry.currency} $${parseFloat(entry.amount || 0).toFixed(2)}</span>
+                        <p class="text-[10px] text-gray-400">Review file 📄</p>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function renderMatrixAnalysis() {
+            const chartContainer = document.getElementById('analysis-chart-container');
+            const targetTimeframe = document.getElementById('analysis-timeframe').value;
+            const targetYear = parseInt(document.getElementById('analysis-year').value);
+            
+            chartContainer.innerHTML = '';
+            let blocks = {};
+            let globalSum = 0;
+
+            if (targetTimeframe === 'monthly') {
+                const mos = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+                mos.forEach(m => blocks[m] = 0);
+                entries.forEach(e => {
+                    const d = new Date(e.date);
+                    if (d.getFullYear() === targetYear) {
+                        blocks[mos[d.getMonth()]] += parseFloat(e.amount || 0);
+                        globalSum += parseFloat(e.amount || 0);
+                    }
+                });
+            } else if (targetTimeframe === 'quarterly') {
+                ["Q1 (Jan-Mar)", "Q2 (Apr-Jun)", "Q3 (Jul-Sep)", "Q4 (Oct-Dec)"].forEach(q => blocks[q] = 0);
+                entries.forEach(e => {
+                    const d = new Date(e.date);
+                    if (d.getFullYear() === targetYear) {
+                        const qIdx = Math.floor(d.getMonth() / 3);
+                        blocks[Object.keys(blocks)[qIdx]] += parseFloat(e.amount || 0);
+                        globalSum += parseFloat(e.amount || 0);
+                    }
+                });
+            } else if (targetTimeframe === '6months') {
+                ["H1 (Jan-Jun)", "H2 (Jul-Dec)"].forEach(h => blocks[h] = 0);
+                entries.forEach(e => {
+                    const d = new Date(e.date);
+                    if (d.getFullYear() === targetYear) {
+                        const hLabel = d.getMonth() < 6 ? "H1 (Jan-Jun)" : "H2 (Jul-Dec)";
+                        blocks[hLabel] += parseFloat(e.amount || 0);
+                        globalSum += parseFloat(e.amount || 0);
+                    }
+                });
+            } else if (targetTimeframe === 'yearly') {
+                blocks[`Full Year ${targetYear}`] = 0;
+                entries.forEach(e => {
+                    const d = new Date(e.date);
+                    if (d.getFullYear() === targetYear) {
+                        blocks[`Full Year ${targetYear}`] += parseFloat(e.amount || 0);
+                        globalSum += parseFloat(e.amount || 0);
+                    }
+                });
+            }
+
+            document.getElementById('analysis-total-aggregate').innerText = `Total: $${globalSum.toFixed(2)} AUD`;
+
+            Object.keys(blocks).forEach(key => {
+                const val = blocks[key];
+                const pct = globalSum > 0 ? (val / globalSum) * 100 : 0;
+                
+                const row = document.createElement('div');
+                row.className = "space-y-1";
+                row.innerHTML = `
+                    <div class="flex justify-between text-xs font-medium">
+                        <span class="text-gray-600">${key}</span>
+                        <span class="font-bold text-gray-900">$${val.toFixed(2)}</span>
+                    </div>
+                    <div class="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                        <div class="bg-blue-500 h-2.5 rounded-full" style="width: ${pct}%"></div>
+                    </div>
+                `;
+                chartContainer.appendChild(row);
+            });
+        }
+
+        // SEPARATE ENTRY MULTI-UPLOAD PROCESSING PIPELINE
+        const receiptInput = document.getElementById('receipt-input');
+        receiptInput.addEventListener('change', (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) return;
+
+            // Map each selected file into its own isolated item configuration instance
+            files.forEach(file => {
+                fileQueue.push({
+                    id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+                    file: file,
+                    dataUrl: null,
+                    rawBlob: file
+                });
+            });
+
+            let processedCount = 0;
+            fileQueue.forEach(item => {
+                if (item.dataUrl) { processedCount++; return; }
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    item.dataUrl = event.target.result;
+                    processedCount++;
+                    if (processedCount === fileQueue.length) renderQueue();
+                };
+                reader.readAsDataURL(item.file);
+            });
+        });
+
+        function renderQueue() {
+            const grid = document.getElementById('preview-grid');
+            grid.innerHTML = '';
+            
+            if (fileQueue.length > 0) {
+                document.getElementById('queue-container').classList.remove('hidden');
+                document.getElementById('queue-count').innerText = fileQueue.length;
+
+                fileQueue.forEach(item => {
+                    const d = document.createElement('div');
+                    d.className = "relative h-14 bg-gray-200 rounded-lg overflow-hidden border border-gray-300 shadow-xs";
+                    d.innerHTML = `<img src="${item.dataUrl || ''}" class="object-cover w-full h-full">`;
+                    grid.appendChild(d);
+                });
+            } else {
+                document.getElementById('queue-container').classList.add('hidden');
+                document.getElementById('step-verify').classList.add('hidden');
+            }
+        }
+
+        // PRODUCTION ENGINE CLIENT-SIDE OCR ENGINE (TESSERACT) INTERACTION MATCHERS
+        document.getElementById('process-btn').addEventListener('click', async () => {
+            if (fileQueue.length === 0) return;
+
+            const hud = document.getElementById('ocr-loading-hud');
+            const progressText = document.getElementById('ocr-progress-text');
+            const currentItem = fileQueue[0];
+
+            hud.classList.remove('hidden');
+            document.getElementById('step-verify').classList.add('hidden');
+
+            try {
+                // Initialize clean, single-pass client OCR extraction worker
+                progressText.innerText = "Spawning recognition workers...";
+                const worker = await Tesseract.createWorker('eng');
+                
+                progressText.innerText = "Parsing image text metrics...";
+                const result = await worker.recognize(currentItem.dataUrl);
+                const rawText = result.data.text;
+                await worker.terminate();
+
+                hud.classList.add('hidden');
+                
+                // Mount file visualization previews
+                document.getElementById('form-receipt-preview').src = currentItem.dataUrl;
+                document.getElementById('form-notes').value = rawText || "Image loaded successfully but zero text characters could be identified.";
+
+                // STRICT FALLBACK LOGIC: Clear fields completely if no text exists to prevent false templates
+                if (!rawText || rawText.trim().length === 0) {
+                    document.getElementById('form-merchant').value = "";
+                    document.getElementById('form-amount').value = "";
+                    document.getElementById('form-date').value = "";
+                } else {
+                    // Extract data structure indicators using smart patterns
+                    document.getElementById('form-merchant').value = parseMerchantPattern(rawText);
+                    document.getElementById('form-amount').value = parseAmountPattern(rawText);
+                    document.getElementById('form-date').value = parseDatePattern(rawText);
+                }
+
+                document.getElementById('step-verify').classList.remove('hidden');
+                document.getElementById('step-verify').scrollIntoView({ behavior: 'smooth' });
+
+            } catch (err) {
+                console.error("OCR Extraction Error Node Failure: ", err);
+                hud.classList.add('hidden');
+                alert("Internal canvas extraction context blocked or processing failed. Loading blank layout manual verification fallback form.");
+                
+                // Ensure empty fallbacks on failure bounds
+                document.getElementById('form-merchant').value = "";
+                document.getElementById('form-amount').value = "";
+                document.getElementById('form-date').value = "";
+                document.getElementById('step-verify').classList.remove('hidden');
+            }
+        });
+
+        // PARSING REGEX MATRIX UTILITIES
+        function parseMerchantPattern(text) {
+            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+            if (lines.length === 0) return "";
+            // Screen out common unhelpful overhead characters to isolate establishment descriptors
+            const blacklist = ["tax invoice", "welcome", "receipt", "store", "sale", "invoice"];
+            for (let line of lines) {
+                if (!blacklist.some(word => line.toLowerCase().includes(word))) {
+                    return line.substring(0, 25);
+                }
+            }
+            return lines[0].substring(0, 25);
+        }
+
+        function parseAmountPattern(text) {
+            // Find total keywords combined with decimal currencies
+            const lines = text.split('\n');
+            let matchedAmounts = [];
+            const moneyRegex = /(?:\$?\s*)(\d+\.\d{2})/g;
+
+            for (let line of lines) {
+                const lower = line.toLowerCase();
+                if (lower.includes('total') || lower.includes('subtotal') || lower.includes('amount') || lower.includes('due')) {
+                    let match;
+                    while ((match = moneyRegex.exec(line)) !== null) {
+                        matchedAmounts.push(parseFloat(match[1]));
+                    }
+                }
+            }
+            if (matchedAmounts.length > 0) return Math.max(...matchedAmounts);
+            
+            // Fallback: search overall string numbers
+            let genericMatches = [];
+            let match;
+            moneyRegex.lastIndex = 0;
+            while ((match = moneyRegex.exec(text)) !== null) {
+                genericMatches.push(parseFloat(match[1]));
+            }
+            return genericMatches.length > 0 ? Math.max(...genericMatches) : "";
+        }
+
+        function parseDatePattern(text) {
+            // Evaluates international and standard fiscal formatted dates
+            const dateRegex = /\b\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}\b/;
+            const isoRegex = /\b\d{4}[/\-.]\d{1,2}[/\-.]\d{1,2}\b/;
+            
+            let match = text.match(isoRegex) || text.match(dateRegex);
+            if (match) {
+                try {
+                    const normalized = match[0].replace(/[\-.]/g, '/');
+                    const timestamp = Date.parse(normalized);
+                    if (!isNaN(timestamp)) {
+                        return new Date(timestamp).toISOString().split('T')[0];
+                    }
+                } catch(e){}
+            }
+            return "2026-07-04"; // Default context timestamp baseline fallback safely
+        }
+
+        // SAVE & COMMIT QUEUE ITEM FLOW
+        document.getElementById('ocr-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (fileQueue.length === 0) return;
+
+            const targetRecord = fileQueue[0];
+            const merchantName = document.getElementById('form-merchant').value.trim() || "Unassigned Merchant";
+            const amountVal = parseFloat(document.getElementById('form-amount').value) || 0.00;
+            const dateVal = document.getElementById('form-date').value || "2026-07-04";
+
+            const verifiedEntry = {
+                id: targetRecord.id,
+                merchant: merchantName,
+                date: dateVal,
+                category: document.getElementById('form-category').value,
+                directory: document.getElementById('directory-select').value,
+                currency: "AUD",
+                amount: amountVal,
+                notes: document.getElementById('form-notes').value,
+                img: targetRecord.dataUrl
+            };
+
+            // Process Cloud Sync Pipeline if active connection token maps are present
+            if (googleTokenResponse && googleTokenResponse.access_token) {
+                updateGDriveStatusIndicator("Uploading verification payload packet stream...");
+                await uploadBlobToGoogleDrive(targetRecord.rawBlob, `${dateVal}_${merchantName.replace(/\s+/g, '_')}.jpg`);
+            }
+
+            // Append unique item cleanly into main dataset arrays
+            entries.unshift(verifiedEntry);
+            fileQueue.shift();
+            
+            renderQueue();
+            document.getElementById('ocr-form').reset();
+
+            if (fileQueue.length > 0) {
+                document.getElementById('process-btn').click();
+            } else {
+                document.getElementById('step-verify').classList.add('hidden');
+                switchView('dashboard', 'Dashboard');
+            }
+        });
+
+        // NATIVE GOOGLE DRIVE CLOUD RUNTIME SYNC HOOK ARCHITECTURES
+        let tokenClient;
+        document.getElementById('gdrive-connect-btn').addEventListener('click', () => {
+            const clientId = document.getElementById('gdrive-client-id').value.trim();
+            if (!clientId) {
+                alert("Please supply a valid Web Client ID from your Google API Console dashboard to handle secure client handshakes.");
+                return;
+            }
+
+            try {
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: clientId,
+                    scope: 'https://www.googleapis.com/auth/drive.file',
+                    callback: async (response) => {
+                        if (response.error) {
+                            updateGDriveStatusIndicator(`Authorization error mapping: ${response.error}`);
+                            return;
+                        }
+                        googleTokenResponse = response;
+                        document.getElementById('gdrive-disconnect-btn').classList.remove('hidden');
+                        updateGDriveStatusIndicator("✅ Secure Connection Established. Cloud sync engine initialized.");
+                    },
+                });
+                tokenClient.requestAccessToken({ prompt: 'consent' });
+            } catch (err) {
+                alert(`Google Identity initialization fault: ${err.message}`);
+            }
+        });
+
+        document.getElementById('gdrive-disconnect-btn').addEventListener('click', () => {
+            googleTokenResponse = null;
+            document.getElementById('gdrive-disconnect-btn').classList.add('hidden');
+            updateGDriveStatusIndicator("Local filesystem preservation active. No cloud account linked.");
+        });
+
+        function updateGDriveStatusIndicator(msg) {
+            document.getElementById('gdrive-status').innerText = msg;
+        }
+
+        // Google Drive Multi-part Blob Upload Pipeline Framework
+        async function uploadBlobToGoogleDrive(fileBlob, filename) {
+            const token = googleTokenResponse.access_token;
+            
+            // Step 1: Verify presence or handle dynamic instantiation of 'Receipt Hub' parent folder container
+            let folderId = 'root';
+            try {
+                const searchUrl = `https://www.googleapis.com/drive/v3/files?q=name='Receipt Hub' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+                const searchRes = await fetch(searchUrl, { headers: { 'Authorization': `Bearer ${token}` } }).then(r => r.json());
+                
+                if (searchRes.files && searchRes.files.length > 0) {
+                    folderId = searchRes.files[0].id;
+                } else {
+                    const folderMeta = { name: 'Receipt Hub', mimeType: 'application/vnd.google-apps.folder' };
+                    const makeFolder = await fetch('https://www.googleapis.com/drive/v3/files', {
+                        method: 'POST',
+                        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                        body: JSON.stringify(folderMeta)
+                    }).then(r => r.json());
+                    folderId = makeFolder.id;
+                }
+            } catch(e) { console.error("Parent directory validation structural failure: ", e); }
+
+            // Step 2: Push Multi-part data stream packet containing binary asset alongside layout payloads
+            const metadata = { name: filename, parents: [folderId] };
+            const form = new FormData();
+            form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+            form.append('file', fileBlob);
+
+            try {
+                await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: form
+                });
+                updateGDriveStatusIndicator("✅ Cloud Sync Transaction finalized successfully.");
+            } catch (err) {
+                updateGDriveStatusIndicator("⚠️ Background upload upload transaction interrupted.");
+                console.error(err);
+            }
+        }
+
+        // Renders and UI Utilities managers definitions
+        function renderCategoryMenus() {
+            const listEl = document.getElementById('categories-list');
+            listEl.innerHTML = '';
+            categories.forEach((cat, index) => {
+                const li = document.createElement('li');
+                li.className = "py-2.5 flex justify-between items-center text-sm font-medium text-gray-700";
+                li.innerHTML = `<span>📁 ${cat}</span><button onclick="deleteCategory(${index})" class="text-red-500 font-bold text-xs p-1">Delete</button>`;
+                listEl.appendChild(li);
+            });
+
+            ['form-category', 'viewer-category'].forEach(id => {
+                const select = document.getElementById(id);
+                const currentVal = select.value;
+                select.innerHTML = '';
+                categories.forEach(cat => {
+                    const opt = document.createElement('option');
+                    opt.value = cat; opt.innerText = cat;
+                    select.appendChild(opt);
+                });
+                if (currentVal) select.value = currentVal;
+            });
+
+            const fastFilterContainer = document.getElementById('filter-fast-categories');
+            fastFilterContainer.innerHTML = '';
+            categories.forEach(cat => {
+                const pill = document.createElement('button');
+                pill.className = "text-[11px] bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full whitespace-nowrap active:bg-blue-100 transition";
+                pill.innerText = cat;
+                pill.onclick = () => {
+                    document.getElementById('search-box').value = cat;
+                    renderEntriesList();
+                };
+                fastFilterContainer.appendChild(pill);
+            });
+        }
+
+        document.getElementById('add-category-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = document.getElementById('new-cat-input');
+            const val = input.value.trim();
+            if (val && !categories.includes(val)) {
+                categories.push(val);
+                input.value = '';
+                renderAll();
+            }
+        });
+
+        window.deleteCategory = function(index) {
+            categories.splice(index, 1);
+            renderAll();
+        };
+
+        const modal = document.getElementById('modal-viewer');
+        function openViewer(id) {
+            const entry = entries.find(e => e.id === id);
+            if (!entry) return;
+
+            document.getElementById('viewer-entry-id').value = entry.id;
+            document.getElementById('viewer-merchant').value = entry.merchant;
+            document.getElementById('viewer-date').value = entry.date;
+            document.getElementById('viewer-directory').value = entry.directory;
+            document.getElementById('viewer-category').value = entry.category;
+            document.getElementById('viewer-amount').value = entry.amount;
+            document.getElementById('viewer-notes').value = entry.notes;
+            document.getElementById('viewer-img').src = entry.img || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23eee"/><text x="50%25" y="50%25" font-size="10" text-anchor="middle" fill="%23aaa">Local File Storage</text></svg>';
+
+            modal.classList.remove('hidden');
+        }
+
+        document.getElementById('modal-close-btn').addEventListener('click', () => modal.classList.add('hidden'));
+
+        document.getElementById('edit-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const id = document.getElementById('viewer-entry-id').value;
+            const idx = entries.findIndex(e => e.id === id);
+            
+            if (idx !== -1) {
+                entries[idx].merchant = document.getElementById('viewer-merchant').value;
+                entries[idx].date = document.getElementById('viewer-date').value;
+                entries[idx].directory = document.getElementById('viewer-directory').value;
+                entries[idx].category = document.getElementById('viewer-category').value;
+                entries[idx].amount = parseFloat(document.getElementById('viewer-amount').value) || 0;
+                entries[idx].notes = document.getElementById('viewer-notes').value;
+                
+                modal.classList.add('hidden');
+                renderAll();
+            }
+        });
+
+        document.getElementById('viewer-delete-btn').addEventListener('click', () => {
+            const id = document.getElementById('viewer-entry-id').value;
+            entries = entries.filter(e => e.id !== id);
+            modal.classList.add('hidden');
+            renderAll();
+        });
+
+        document.getElementById('search-box').addEventListener('input', renderEntriesList);
+        document.getElementById('filter-start-date').addEventListener('change', renderEntriesList);
+        document.getElementById('filter-end-date').addEventListener('change', renderEntriesList);
+        document.getElementById('analysis-timeframe').addEventListener('change', renderMatrixAnalysis);
+        document.getElementById('analysis-year').addEventListener('change', renderMatrixAnalysis);
+
+        // Bootstrap Initializations
+        renderAll();
+    </script>
+</body>
+</html>
