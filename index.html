@@ -309,6 +309,36 @@
   .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 
   input[type=file]{display:none;}
+
+  /* ---------- Lightbox ---------- */
+  .lightbox{
+    position:fixed; inset:0; background:rgba(8,12,10,0.97); z-index:200; display:none;
+    flex-direction:column;
+  }
+  .lightbox.open{display:flex;}
+  .lightbox-top{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:calc(14px + env(safe-area-inset-top)) 18px 12px;
+  }
+  .lightbox-count{ color:#9CB3A2; font-family:var(--mono); font-size:12px; letter-spacing:.06em;}
+  .lightbox-close{ background:rgba(255,255,255,0.12); border:none; color:#fff; width:34px; height:34px; border-radius:50%; font-size:16px; cursor:pointer;}
+  .lightbox-stage{
+    flex:1; display:flex; align-items:center; justify-content:center; overflow:auto; padding:10px 14px;
+    touch-action:pinch-zoom pan-x pan-y;
+  }
+  .lightbox-stage img{
+    max-width:100%; max-height:100%; object-fit:contain; border-radius:6px;
+  }
+  .lightbox-nav{
+    display:flex; justify-content:space-between; gap:10px;
+    padding:14px 18px calc(20px + env(safe-area-inset-bottom));
+  }
+  .lightbox-arrow{
+    flex:1; background:rgba(255,255,255,0.1); border:none; color:#fff; padding:12px; border-radius:12px;
+    font-size:13px; font-weight:700; cursor:pointer;
+  }
+  .lightbox-arrow:disabled{ opacity:.3; }
+  .thumb, .cap-thumb, .receipt-preview-strip img{ cursor:pointer; }
 </style>
 </head>
 <body>
@@ -419,6 +449,7 @@
     <div id="ocrErrorBanner" style="display:none; margin:0 20px 10px; padding:10px 12px; background:#F4E2DD; border-radius:10px; font-size:12.5px; color:#8A3A2C; line-height:1.4;"></div>
 
     <div class="receipt-preview-strip" id="previewStrip"></div>
+    <div id="previewHint" style="font-size:10.5px;color:var(--ink-soft);padding:0 20px 8px;font-family:var(--mono); display:none;">Tap image to view full size &amp; compare against extracted data</div>
 
     <div class="form-body">
       <div class="field" id="fieldFolder">
@@ -509,6 +540,21 @@
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- IMAGE LIGHTBOX -->
+  <div class="lightbox" id="lightbox">
+    <div class="lightbox-top">
+      <span class="lightbox-count" id="lightboxCount">1 / 1</span>
+      <button class="lightbox-close" id="lightboxClose">✕</button>
+    </div>
+    <div class="lightbox-stage" id="lightboxStage">
+      <img id="lightboxImg" src="" alt="Receipt image">
+    </div>
+    <div class="lightbox-nav" id="lightboxNav">
+      <button class="lightbox-arrow" id="lightboxPrev">◀ Prev</button>
+      <button class="lightbox-arrow" id="lightboxNext">Next ▶</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -632,6 +678,17 @@ function renderReceiptList(){
     `;
     card.onclick = ()=> openReviewForExisting(r.id);
     el.appendChild(card);
+
+    // wire up thumbnail tap -> lightbox preview (stopPropagation so it doesn't also open the edit sheet)
+    if(r.images && r.images.length){
+      const thumbImg = card.querySelector('.thumb img');
+      if(thumbImg){
+        thumbImg.addEventListener('click', (e)=>{
+          e.stopPropagation();
+          openLightbox(r.images, 0);
+        });
+      }
+    }
   });
 
   document.getElementById('totalAmount').innerText = total.toFixed(2);
@@ -915,55 +972,107 @@ function friendlyOcrError(raw){
 
 /* ---- Naive-but-useful receipt text parser ---- */
 function parseReceiptText(text){
-  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  // OCR.space frequently merges visually-separate text (headers, side-by-side columns)
+  // onto one "line" separated by large whitespace gaps. Split on 3+ spaces as well as
+  // newlines so each logical fragment can be scored independently — but ALSO keep each
+  // original un-split line as its own candidate, since store name headers are sometimes
+  // themselves spaced out (e.g. "POSH   OPP   SHOPPE") and splitting them would shred
+  // the name into single words.
+  const rawLines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const lines = [];
+  rawLines.forEach(rl=>{
+    lines.push(rl); // always keep the full original line as its own candidate too
+
+    // split on large gaps (2+ spaces) or tabs into rough column fragments
+    const fragments = rl.split(/ {2,}|\t+/).map(p=>p.trim()).filter(Boolean);
+    fragments.forEach(f=>{ if(f !== rl) lines.push(f); });
+
+    // separately: scan word-by-word and merge consecutive short ALL-CAPS words
+    // into a heading candidate (handles "POSH   OPP        SHOPPE  Posh Opp..." style lines
+    // where a caps header is glued to a mixed-case repeat with inconsistent gaps)
+    const words = rl.split(/\s+/).filter(Boolean);
+    let buffer = [];
+    words.forEach(w=>{
+      const core = w.replace(/[^A-Za-z]/g,'');
+      const isShortCapsWord = /^[A-Z]{2,14}$/.test(core) && core.length===w.replace(/[().,]/g,'').length;
+      if(isShortCapsWord){
+        buffer.push(core);
+      } else {
+        if(buffer.length>=2) lines.push(buffer.join(' '));
+        buffer = [];
+      }
+    });
+    if(buffer.length>=2) lines.push(buffer.join(' '));
+  });
   const confidences = {};
 
   // --- Amount: look for the largest currency-like number, prefer lines with TOTAL ---
   let amount = '';
-  const excludeTotalPattern = /sub ?total|saved|savings|points|balance|change|gst|tax\b|item count|qty/i;
+  const excludeTotalPattern = /sub ?total|saved|savings|points|balance|change|item count|qty/i;
+  // money can appear as: $8.00 / A$8.00 / AU$8.00 / AUD 8.00 / 8.00
+  const moneyRegex = /(?:[A-Z]{0,3}\$|\$)?\s?(\d{1,4}(?:[.,]\d{2}))\b/;
   const totalLines = lines.filter(l=> /\btotal\b/i.test(l) && !excludeTotalPattern.test(l));
-  const moneyRegex = /\$?\s?(\d{1,4}[.,]\d{2})\b/;
   if(totalLines.length){
-    // prefer the LAST matching total line — grand total usually printed after subtotal/tax breakdown
-    const lastTotalLine = totalLines[totalLines.length-1];
-    const m = lastTotalLine.match(moneyRegex);
-    if(m){ amount = m[1].replace(',', '.'); confidences.amount='high'; }
+    // scan every total line, collect all money matches, take the largest
+    // (grand total is usually the largest value among total/subtotal/amount-tendered lines)
+    let totalCandidates = [];
+    totalLines.forEach(l=>{
+      const matches = l.match(/(?:[A-Z]{0,3}\$)\s?\d{1,4}[.,]\d{2}\b/g);
+      if(matches) totalCandidates.push(...matches.map(m=> parseFloat(m.replace(/[A-Z$]/g,'').replace(',','.'))));
+    });
+    if(totalCandidates.length){
+      amount = Math.max(...totalCandidates).toFixed(2);
+      confidences.amount='high';
+    }
   }
   if(!amount){
-    // fallback: grab the largest number that looks like money anywhere in text
+    // fallback: grab the largest currency-looking number anywhere in the text (with $ sign preferred)
     let candidates = [];
     lines.forEach(l=>{
       if(excludeTotalPattern.test(l)) return;
-      const matches = l.match(/\$?\s?\d{1,4}[.,]\d{2}\b/g);
-      if(matches) candidates.push(...matches.map(m=>parseFloat(m.replace('$','').replace(',','.'))));
+      const matches = l.match(/(?:[A-Z]{0,3}\$)\s?\d{1,4}[.,]\d{2}\b/g);
+      if(matches) candidates.push(...matches.map(m=>parseFloat(m.replace(/[A-Z$]/g,'').replace(',','.'))));
     });
     if(candidates.length){
       amount = Math.max(...candidates).toFixed(2);
-      confidences.amount = 'low';
+      confidences.amount = 'medium';
     } else {
-      confidences.amount = 'low';
+      // last resort: any bare decimal number even without a currency symbol
+      let bareCandidates = [];
+      lines.forEach(l=>{
+        if(excludeTotalPattern.test(l)) return;
+        const matches = l.match(/\b\d{1,4}[.,]\d{2}\b/g);
+        if(matches) bareCandidates.push(...matches.map(m=>parseFloat(m.replace(',','.'))));
+      });
+      if(bareCandidates.length){
+        amount = Math.max(...bareCandidates).toFixed(2);
+        confidences.amount = 'low';
+      } else {
+        confidences.amount = 'low';
+      }
     }
   }
 
-  // --- Date: look for common date patterns ---
+  // --- Date: look for common date patterns (handles a trailing time stamp on the same line, e.g. "05/07/2026 15:15:14") ---
   let date = '';
-  const dateRegexes = [
-    /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/,
-    /\b(\d{4})-(\d{2})-(\d{2})\b/
-  ];
+  const slashDateRegex = /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/;
+  const isoDateRegex = /\b(\d{4})-(\d{2})-(\d{2})\b/;
   for(const l of lines){
-    let m = l.match(dateRegexes[1]);
+    let m = l.match(isoDateRegex);
     if(m){ date = `${m[1]}-${m[2]}-${m[3]}`; confidences.date='high'; break; }
-    m = l.match(dateRegexes[0]);
+    m = l.match(slashDateRegex);
     if(m){
       let [_, a, b, y] = m;
       if(y.length===2) y = '20'+y;
-      // assume DD/MM/YYYY (AU convention)
+      // AU convention is DD/MM/YYYY; swap only if the first number can't be a valid day
       let dd = a.padStart(2,'0'), mm = b.padStart(2,'0');
-      if(parseInt(dd)>31 || parseInt(mm)>12){ [dd,mm] = [mm,dd]; }
-      date = `${y}-${mm}-${dd}`;
-      confidences.date = 'medium';
-      break;
+      if(parseInt(dd,10)>31 || parseInt(mm,10)>12){ [dd,mm] = [mm,dd]; }
+      // sanity check the resulting date is real before accepting it
+      if(parseInt(dd,10)>=1 && parseInt(dd,10)<=31 && parseInt(mm,10)>=1 && parseInt(mm,10)<=12){
+        date = `${y}-${mm}-${dd}`;
+        confidences.date = 'high';
+        break;
+      }
     }
   }
   if(!date){
@@ -973,15 +1082,18 @@ function parseReceiptText(text){
 
   // --- Establishment: score candidate lines instead of just taking the first plausible one ---
   let establishment = '';
-  const junkPattern = /^(tax invoice|invoice|receipt|abn|acn|gst|thank you|thanks for|www\.|http|tel:|phone|ph:|customer (copy|details)|loyalty|card|eftpos|change|balance|cashier|operator|store\s?#|reg(ister)?\s?\d|welcome to|have a|see you|survey|feedback|your (receipt|opinion))/i;
+  const junkPattern = /^(tax invoice|invoice|receipt|abn|acn|gst|thank you|thanks for|www\.|http|tel:|phone|ph:|customer (copy|details)|loyalty|card|eftpos|change|balance|cashier|operator|store\s?#|reg(ister)?\s?\d|welcome to|have a|see you|survey|feedback|your (receipt|opinion)|receipt of purchase|recept of purchase)/i;
+  // common single-word receipt boilerplate that is often printed in caps near the top
+  // but is NEVER the business name — must be excluded outright, not just down-weighted
+  const boilerplateWords = new Set(['TOTAL','SUBTOTAL','AMOUNT','TAX','GST','VAT','QTY','PRICE','PRODUCT','ITEM','ITEMS','CASH','CARD','CHANGE','BALANCE','TENDER','PAYMENT','STAFF','DEVICE','CASHIER','OPERATOR','REGISTER','TILL','RECEIPT','INVOICE','DATE','TIME','THANK','THANKS','THANKYOU','WELCOME'].map(w=>w.toUpperCase()));
   const addressPattern = /\b(street|st\.|road|rd\.|avenue|ave\.|drive|dr\.|highway|hwy|suite|unit|level|shop\s?\d|nsw|vic|qld|wa|sa|tas|act|nt)\b/i;
   const looksLikeDate = /\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/;
   const looksLikeTime = /\d{1,2}:\d{2}/;
   const looksLikePhone = /\(?\d{2,4}\)?[\s-]?\d{3,4}[\s-]?\d{3,4}/;
 
   const candidates = [];
-  // only look at the first ~12 lines — establishment name is always near the top of a receipt
-  lines.slice(0, 12).forEach((l, idx)=>{
+  // widen window since splitting on whitespace-gaps produces more, shorter fragments per original line
+  lines.slice(0, 20).forEach((l, idx)=>{
     const clean = l.replace(/[^a-zA-Z0-9 &'.,\-]/g, '').trim();
     if(clean.length<3 || clean.length>40) return;
     if(junkPattern.test(clean)) return;
@@ -992,17 +1104,39 @@ function parseReceiptText(text){
     const letterCount = (clean.match(/[a-zA-Z]/g)||[]).length;
     if(letterCount < clean.length * 0.5) return; // too many symbols/digits to be a name
 
+    const wordCount = clean.split(/\s+/).filter(Boolean).length;
+    // a lone single word that's pure receipt boilerplate is never the establishment name
+    if(wordCount===1 && boilerplateWords.has(clean.toUpperCase())) return;
+
     let score = 0;
     score += Math.max(0, 6 - idx);              // earlier lines score higher
     if(clean === clean.toUpperCase()) score += 4; // store names often printed in caps
     if(/^[A-Z]/.test(clean)) score += 1;
-    if(clean.split(' ').length <= 5) score += 2;  // short phrases more likely to be a name
+    if(wordCount>=2 && wordCount<=5) score += 4;  // multi-word phrases are much more likely to be a real name
+    if(wordCount===1) score -= 3;                 // single bare words are risky/ambiguous — de-prioritise
     if(/pty ltd|pty\.? ltd\.?|limited|inc\.?/i.test(clean)) score += 1;
 
     candidates.push({ text: clean, score, idx });
   });
 
   candidates.sort((a,b)=> b.score - a.score);
+
+  // if the same (or near-same) name-like phrase appears more than once near the top,
+  // that repetition itself is a strong signal it's the store name (receipts often
+  // print the name once in a large header and again in a smaller confirmation line).
+  // Use substring containment (not exact match) since one occurrence may have trailing
+  // text like "(Elsternwick)" appended that the other doesn't.
+  candidates.forEach(c=>{
+    const key = c.text.toLowerCase().replace(/[^a-z0-9]/g,'');
+    if(key.length<4) return;
+    const repeats = candidates.filter(o=>{
+      const okey = o.text.toLowerCase().replace(/[^a-z0-9]/g,'');
+      return okey.length>=4 && o!==c && (okey.includes(key) || key.includes(okey));
+    }).length;
+    if(repeats>0) c.score += 3;
+  });
+  candidates.sort((a,b)=> b.score - a.score);
+
   if(candidates.length){
     establishment = candidates[0].text;
     confidences.establishment = candidates[0].score >= 6 ? 'high' : (candidates[0].score >= 3 ? 'medium' : 'low');
@@ -1138,14 +1272,20 @@ function populateSheet(){
   }
 
   const strip = document.getElementById('previewStrip');
+  const hintEl = document.getElementById('previewHint');
   strip.innerHTML='';
-  (d.images||[]).forEach(img=>{
+  (d.images||[]).forEach((img, i)=>{
     const el = document.createElement('img');
     el.src = img;
+    el.title = 'Tap to view full size';
+    el.addEventListener('click', ()=> openLightbox(d.images, i));
     strip.appendChild(el);
   });
   if(!d.images || d.images.length===0){
     strip.innerHTML = '<div style="font-size:12px;color:var(--ink-soft);padding:8px 0;">No image attached to this entry.</div>';
+    hintEl.style.display = 'none';
+  } else {
+    hintEl.style.display = 'block';
   }
 
   renderFolderSelectRow(d.folderId);
@@ -1261,6 +1401,37 @@ storageBackdrop.onclick = ()=>{
   storageBackdrop.classList.remove('open');
   storageSheet.classList.remove('open');
 };
+
+/* ============================================================
+   IMAGE LIGHTBOX
+   ============================================================ */
+const lightbox = document.getElementById('lightbox');
+let lightboxImages = [];
+let lightboxIndex = 0;
+
+function openLightbox(images, startIndex=0){
+  if(!images || images.length===0) return;
+  lightboxImages = images;
+  lightboxIndex = startIndex;
+  renderLightbox();
+  lightbox.classList.add('open');
+}
+function renderLightbox(){
+  document.getElementById('lightboxImg').src = lightboxImages[lightboxIndex];
+  document.getElementById('lightboxCount').innerText = `${lightboxIndex+1} / ${lightboxImages.length}`;
+  document.getElementById('lightboxNav').style.display = lightboxImages.length>1 ? 'flex':'none';
+  document.getElementById('lightboxPrev').disabled = lightboxIndex===0;
+  document.getElementById('lightboxNext').disabled = lightboxIndex===lightboxImages.length-1;
+}
+function closeLightbox(){ lightbox.classList.remove('open'); }
+
+document.getElementById('lightboxClose').onclick = closeLightbox;
+document.getElementById('lightboxPrev').onclick = ()=>{ if(lightboxIndex>0){ lightboxIndex--; renderLightbox(); } };
+document.getElementById('lightboxNext').onclick = ()=>{ if(lightboxIndex<lightboxImages.length-1){ lightboxIndex++; renderLightbox(); } };
+// tap the dark backdrop area (not the image itself) to close
+document.getElementById('lightboxStage').addEventListener('click', (e)=>{
+  if(e.target.id==='lightboxStage') closeLightbox();
+});
 
 /* ============================================================
    TOAST
