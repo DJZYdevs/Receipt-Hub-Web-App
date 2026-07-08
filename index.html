@@ -465,6 +465,7 @@
       <div class="field" id="fieldEstablishment">
         <label>Establishment <span class="conf" id="confEst"></span></label>
         <input type="text" id="inputEstablishment" placeholder="e.g. Bunnings Warehouse">
+        <div id="knownMerchantBadge" style="display:none; font-size:11px; color:var(--sage-deep); margin-top:6px; font-weight:600;">✓ Recognised from a previous receipt</div>
       </div>
 
       <div class="field" id="fieldAmount">
@@ -536,6 +537,10 @@
         <input type="text" id="inputApiKey" placeholder="helloworld (demo key)">
       </div>
       <p style="margin-top:-6px;">Get your own free key in 30 seconds at <strong>ocr.space/ocrapi</strong> (no credit card) and paste it above — it's saved in this browser only and unlocks much higher limits.</p>
+
+      <h4>Known merchants</h4>
+      <p>Every time you verify a receipt, the app remembers the establishment name and category. Next time that merchant's name appears anywhere in the scanned text — even on a messy or oddly-formatted receipt — it's matched instantly instead of guessed.</p>
+      <div id="merchantList" style="margin-top:10px;"></div>
     </div>
   </div>
 
@@ -929,6 +934,48 @@ async function ocrSpaceRecognize(dataUrl, attempt=1){
   return parsedText;
 }
 
+/* ============================================================
+   KNOWN MERCHANTS (learns from your corrections over time)
+   ============================================================ */
+function getKnownMerchants(){
+  try{
+    return JSON.parse(localStorage.getItem('known_merchants') || '[]');
+  }catch(e){ return []; }
+}
+function saveKnownMerchants(list){
+  localStorage.setItem('known_merchants', JSON.stringify(list.slice(0, 200))); // cap list size
+}
+// call this whenever a receipt is verified & saved, so the app "learns" the merchant
+function rememberMerchant(establishment, category){
+  if(!establishment || establishment.trim().length<2) return;
+  const list = getKnownMerchants();
+  const key = establishment.trim().toLowerCase();
+  const existing = list.find(m=> m.key===key);
+  if(existing){
+    existing.name = establishment.trim(); // keep most recent casing/spelling
+    existing.category = category || existing.category;
+    existing.count = (existing.count||1) + 1;
+  } else {
+    list.unshift({ key, name: establishment.trim(), category: category||'Misc', count:1 });
+  }
+  saveKnownMerchants(list);
+}
+// look for any known merchant name appearing anywhere in the OCR text
+function matchKnownMerchant(fullText){
+  const list = getKnownMerchants();
+  if(!list.length) return null;
+  const lowerText = fullText.toLowerCase().replace(/[^a-z0-9 ]/g,' ');
+  // sort longest name first so more specific matches win over short/ambiguous ones
+  const sorted = [...list].sort((a,b)=> b.key.length - a.key.length);
+  for(const m of sorted){
+    const cleanKey = m.key.replace(/[^a-z0-9 ]/g,' ').trim();
+    if(cleanKey.length>=3 && lowerText.includes(cleanKey)){
+      return m;
+    }
+  }
+  return null;
+}
+
 async function runOCROnImages(images, onProgress){
   let fullText = '';
   let lastError = null;
@@ -948,6 +995,16 @@ async function runOCROnImages(images, onProgress){
 
   const result = parseReceiptText(fullText);
   result.rawOcrText = fullText.trim();
+
+  // known-merchant override: if this text mentions a merchant you've corrected before,
+  // trust that over the generic heuristics — it's a much stronger signal
+  const knownMatch = matchKnownMerchant(fullText);
+  if(knownMatch){
+    result.establishment = knownMatch.name;
+    result.category = knownMatch.category;
+    result.confidences.establishment = 'high';
+    result.matchedKnownMerchant = true;
+  }
 
   if(successCount===0 && lastError){
     // total failure — surface this clearly rather than silently returning empty fields
@@ -1057,6 +1114,12 @@ function parseReceiptText(text){
   let date = '';
   const slashDateRegex = /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/;
   const isoDateRegex = /\b(\d{4})-(\d{2})-(\d{2})\b/;
+  const monthNames = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
+  const monthNamePattern = new RegExp('\\b(' + Object.keys(monthNames).join('|') + ')[a-z]*\\b', 'i');
+  // handles "JUL 02, 26", "02 Jul 2026", "Jul 2, 2026" etc.
+  const monthFirstRegex = new RegExp('\\b(' + Object.keys(monthNames).join('|') + ')[a-z]*\\.?\\s+(\\d{1,2}),?\\s+(\\d{2,4})\\b', 'i');
+  const dayFirstRegex = new RegExp('\\b(\\d{1,2})\\s+(' + Object.keys(monthNames).join('|') + ')[a-z]*\\.?,?\\s+(\\d{2,4})\\b', 'i');
+
   for(const l of lines){
     let m = l.match(isoDateRegex);
     if(m){ date = `${m[1]}-${m[2]}-${m[3]}`; confidences.date='high'; break; }
@@ -1074,6 +1137,29 @@ function parseReceiptText(text){
         break;
       }
     }
+    // month-name formats — common on payment terminal slips (e.g. "JUL 02, 26")
+    m = l.match(monthFirstRegex);
+    if(m){
+      const mm = monthNames[m[1].toLowerCase()];
+      let dd = parseInt(m[2],10);
+      let y = m[3].length===2 ? '20'+m[3] : m[3];
+      if(mm && dd>=1 && dd<=31){
+        date = `${y}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+        confidences.date = 'high';
+        break;
+      }
+    }
+    m = l.match(dayFirstRegex);
+    if(m){
+      let dd = parseInt(m[1],10);
+      const mm = monthNames[m[2].toLowerCase()];
+      let y = m[3].length===2 ? '20'+m[3] : m[3];
+      if(mm && dd>=1 && dd<=31){
+        date = `${y}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
+        confidences.date = 'high';
+        break;
+      }
+    }
   }
   if(!date){
     date = new Date().toISOString().slice(0,10);
@@ -1086,6 +1172,10 @@ function parseReceiptText(text){
   // common single-word receipt boilerplate that is often printed in caps near the top
   // but is NEVER the business name — must be excluded outright, not just down-weighted
   const boilerplateWords = new Set(['TOTAL','SUBTOTAL','AMOUNT','TAX','GST','VAT','QTY','PRICE','PRODUCT','ITEM','ITEMS','CASH','CARD','CHANGE','BALANCE','TENDER','PAYMENT','STAFF','DEVICE','CASHIER','OPERATOR','REGISTER','TILL','RECEIPT','INVOICE','DATE','TIME','THANK','THANKS','THANKYOU','WELCOME'].map(w=>w.toUpperCase()));
+  // EFTPOS terminal / payment-processor headers — these appear on card payment slips
+  // (as opposed to itemised store receipts) and are NEVER the merchant, just the bank/network
+  // that processed the payment. The real merchant is almost always the line right below this.
+  const paymentProcessorPattern = /\b(nab|anz|cba|commonwealth bank|westpac|bendigo|suncorp|bankwest|tyro|square|zeller|smartpay|verifone|ingenico|worldline|pin ?pad)\b.*\b(eftpos|terminal|pos)\b|\beftpos\b.*\b(nab|anz|cba|westpac|bendigo|suncorp|bankwest|tyro|square|zeller)\b/i;
   const addressPattern = /\b(street|st\.|road|rd\.|avenue|ave\.|drive|dr\.|highway|hwy|suite|unit|level|shop\s?\d|nsw|vic|qld|wa|sa|tas|act|nt)\b/i;
   const looksLikeDate = /\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/;
   const looksLikeTime = /\d{1,2}:\d{2}/;
@@ -1097,6 +1187,7 @@ function parseReceiptText(text){
     const clean = l.replace(/[^a-zA-Z0-9 &'.,\-]/g, '').trim();
     if(clean.length<3 || clean.length>40) return;
     if(junkPattern.test(clean)) return;
+    if(paymentProcessorPattern.test(clean)) return; // e.g. "NAB EFTPOS" — bank/terminal name, not the merchant
     if(addressPattern.test(clean)) return;
     if(looksLikeDate.test(clean) || looksLikeTime.test(clean) || looksLikePhone.test(clean)) return;
     if(/^\d+$/.test(clean)) return;
@@ -1290,6 +1381,7 @@ function populateSheet(){
 
   renderFolderSelectRow(d.folderId);
   document.getElementById('inputDate').value = d.date || '';
+  document.getElementById('knownMerchantBadge').style.display = d.matchedKnownMerchant ? 'block' : 'none';
   document.getElementById('inputEstablishment').value = d.establishment || '';
   document.getElementById('inputAmount').value = d.amount || '';
   document.getElementById('inputCurrency').value = d.currency || 'AUD';
@@ -1353,6 +1445,9 @@ document.getElementById('btnConfirm').onclick = ()=>{
     return;
   }
 
+  // learn this merchant so future receipts from the same place are recognised instantly
+  rememberMerchant(currentReviewDraft.establishment, currentReviewDraft.category);
+
   if(editingExistingId){
     const i = receipts.findIndex(r=>r.id===editingExistingId);
     receipts[i] = { ...currentReviewDraft, id:editingExistingId, verified:true, needsCheck:false };
@@ -1384,9 +1479,39 @@ const storageSheet = document.getElementById('storageSheet');
 const storageBackdrop = document.getElementById('storageBackdrop');
 document.getElementById('btnStorageInfo').onclick = ()=>{
   document.getElementById('inputApiKey').value = localStorage.getItem('ocrspace_key') || '';
+  renderMerchantList();
   storageBackdrop.classList.add('open');
   storageSheet.classList.add('open');
 };
+
+function renderMerchantList(){
+  const container = document.getElementById('merchantList');
+  const list = getKnownMerchants();
+  if(!list.length){
+    container.innerHTML = '<p style="font-size:12.5px; color:var(--ink-soft);">No merchants learned yet — verify a few receipts and they\'ll show up here.</p>';
+    return;
+  }
+  container.innerHTML = '';
+  list.slice(0, 50).forEach(m=>{
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:9px 12px; background:var(--card); border:1px solid var(--rule); border-radius:10px; margin-bottom:6px;';
+    row.innerHTML = `
+      <div style="min-width:0;">
+        <div style="font-size:13px; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(m.name)}</div>
+        <div style="font-size:11px; color:var(--ink-soft);">${escapeHtml(m.category)} · seen ${m.count}×</div>
+      </div>
+      <button data-key="${escapeHtml(m.key)}" style="flex:0 0 auto; background:var(--paper-dim); border:none; color:var(--ink-soft); width:28px; height:28px; border-radius:50%; font-size:13px; cursor:pointer;">✕</button>
+    `;
+    row.querySelector('button').addEventListener('click', ()=>{
+      const updated = getKnownMerchants().filter(x=>x.key!==m.key);
+      saveKnownMerchants(updated);
+      renderMerchantList();
+      showToast('Removed from known merchants');
+    });
+    container.appendChild(row);
+  });
+}
+
 document.getElementById('inputApiKey').addEventListener('change', (e)=>{
   const val = e.target.value.trim();
   if(val) localStorage.setItem('ocrspace_key', val);
