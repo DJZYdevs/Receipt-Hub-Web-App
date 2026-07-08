@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ledger — Receipt Tracker</title>
+<style>
+  :root{
+    --paper:#F6F4EE;
+    --paper-dim:#EFEBE0;
+    --ink:#1F2A24;
+    --ink-soft:#5B6B60;
+    --sage:#7A9482;
+    --sage-deep:#4E6B58;
+    --sage-pale:#DCE6DD;
+    --rule:#D8D2C2;
+    --amber:#C48A3F;
+    --red:#B0503F;
+    --card:#FFFFFF;
+    --radius:14px;
+    --mono: 'SF Mono', ui-monospace, 'Courier New', monospace;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    min-height:100vh;
+    padding-bottom:90px;
+  }
+  .app{max-width:480px;margin:0 auto;position:relative;min-height:100vh;background:var(--paper);}
+
+  /* ---------- Top bar / ledger header ---------- */
+  .topbar{
+    padding:22px 20px 16px;
+    background:var(--paper);
+    position:sticky; top:0; z-index:40;
+    border-bottom:1px solid var(--rule);
+  }
+  .brand{
+    display:flex; align-items:baseline; justify-content:space-between;
+  }
+  .brand-mark{
+    font-family:var(--mono);
+    font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--sage-deep); font-weight:600;
+  }
+  .brand h1{
+    font-size:23px; margin:2px 0 0; font-weight:700; letter-spacing:-0.02em;
+    color:var(--ink);
+  }
+  .folder-chip{
+    font-family:var(--mono); font-size:11.5px; padding:6px 10px;
+    background:var(--sage-pale); color:var(--sage-deep); border-radius:20px;
+    border:1px solid #c9d8cb; white-space:nowrap;
+  }
+  .running-total{
+    margin-top:14px; display:flex; align-items:flex-end; justify-content:space-between;
+  }
+  .running-total .num{ font-size:34px; font-weight:700; letter-spacing:-0.03em; font-variant-numeric: tabular-nums;}
+  .running-total .sub{ font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.08em; margin-bottom:4px;}
+  .running-total .curr{ font-size:16px; color:var(--ink-soft); font-weight:600; margin-right:2px;}
+
+  /* ---------- Folder tabs ---------- */
+  .folders{
+    display:flex; gap:8px; padding:14px 20px 4px; overflow-x:auto;
+    scrollbar-width:none;
+  }
+  .folders::-webkit-scrollbar{display:none;}
+  .folder-btn{
+    flex:0 0 auto; padding:9px 14px; border-radius:11px; border:1px solid var(--rule);
+    background:var(--card); font-size:13px; font-weight:600; color:var(--ink-soft);
+    display:flex; align-items:center; gap:6px; cursor:pointer; white-space:nowrap;
+  }
+  .folder-btn .dot{width:7px;height:7px;border-radius:50%; display:inline-block;}
+  .folder-btn.active{ background:var(--ink); color:var(--paper); border-color:var(--ink);}
+  .folder-btn.add{ color:var(--sage-deep); border-style:dashed; border-color:var(--sage);}
+
+  /* ---------- Section label ---------- */
+  .section-label{
+    padding:18px 20px 8px; font-family:var(--mono); font-size:11px;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--ink-soft);
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .section-label .count{ background:var(--paper-dim); padding:2px 8px; border-radius:10px; font-weight:700; color:var(--ink);}
+
+  /* ---------- Receipt list ---------- */
+  .receipt-list{padding:0 20px; display:flex; flex-direction:column; gap:10px;}
+  .receipt-card{
+    background:var(--card); border-radius:var(--radius); border:1px solid var(--rule);
+    padding:14px; display:flex; gap:12px; align-items:center; cursor:pointer;
+    position:relative; overflow:hidden;
+  }
+  .receipt-card:active{ background:var(--paper-dim); }
+  .receipt-card .accent{
+    position:absolute; left:0; top:0; bottom:0; width:4px;
+  }
+  .thumb{
+    width:46px; height:46px; border-radius:9px; background:var(--paper-dim);
+    display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+    font-size:18px; overflow:hidden; border:1px solid var(--rule);
+  }
+  .thumb img{width:100%; height:100%; object-fit:cover;}
+  .r-info{flex:1; min-width:0;}
+  .r-name{font-size:14.5px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .r-meta{font-size:12px; color:var(--ink-soft); margin-top:2px; display:flex; gap:6px; align-items:center;}
+  .cat-pill{
+    font-size:10px; font-weight:700; padding:2px 7px; border-radius:8px;
+    text-transform:uppercase; letter-spacing:.03em;
+  }
+  .r-amount{ font-family:var(--mono); font-weight:700; font-size:15px; text-align:right; flex:0 0 auto;}
+  .r-amount .status{ display:block; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-top:2px;}
+  .status.verified{color:var(--sage-deep);}
+  .status.pending{color:var(--amber);}
+
+  .empty-state{
+    margin:30px 20px; padding:40px 24px; text-align:center; border:1.5px dashed var(--rule);
+    border-radius:var(--radius); color:var(--ink-soft);
+  }
+  .empty-state .glyph{font-size:30px; margin-bottom:10px;}
+  .empty-state h3{color:var(--ink); font-size:16px; margin:0 0 6px;}
+  .empty-state p{font-size:13px; line-height:1.5; margin:0;}
+
+  /* ---------- Bottom capture bar ---------- */
+  .capture-bar{
+    position:fixed; bottom:0; left:0; right:0; z-index:50;
+    max-width:480px; margin:0 auto;
+    background:var(--card); border-top:1px solid var(--rule);
+    padding:12px 20px calc(14px + env(safe-area-inset-bottom));
+    display:flex; gap:10px; align-items:center;
+    box-shadow:0 -6px 24px rgba(20,30,25,0.06);
+  }
+  .cap-btn{
+    flex:1; border:none; border-radius:13px; padding:13px 8px; font-size:12.5px;
+    font-weight:700; display:flex; flex-direction:column; align-items:center; gap:4px;
+    cursor:pointer; color:var(--ink);
+  }
+  .cap-btn .ic{font-size:19px;}
+  .cap-btn.primary{ background:var(--sage-deep); color:#fff; flex:1.3;}
+  .cap-btn.secondary{ background:var(--paper-dim); color:var(--ink);}
+
+  /* ---------- Camera overlay ---------- */
+  .camera-view{
+    position:fixed; inset:0; background:#0D120E; z-index:100; display:none;
+    flex-direction:column;
+  }
+  .camera-view.open{display:flex;}
+  .cam-top{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:16px 18px calc(10px + env(safe-area-inset-top)); color:#fff;
+  }
+  .cam-top .cam-title{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:#9CB3A2;}
+  .cam-close{ background:rgba(255,255,255,0.12); border:none; color:#fff; width:34px; height:34px; border-radius:50%; font-size:16px; cursor:pointer;}
+  .cam-stage{flex:1; position:relative; overflow:hidden; background:#000; display:flex; align-items:center; justify-content:center;}
+  .cam-stage video, .cam-stage canvas{width:100%; height:100%; object-fit:cover;}
+  .cam-frame-hint{
+    position:absolute; inset:26px 22px; border:2px dashed rgba(255,255,255,0.35); border-radius:16px;
+    pointer-events:none;
+  }
+  .cam-caps-strip{
+    display:flex; gap:8px; padding:10px 18px; overflow-x:auto;
+  }
+  .cap-thumb{width:52px; height:52px; border-radius:8px; object-fit:cover; border:2px solid var(--sage); flex:0 0 auto;}
+  .cam-controls{
+    padding:18px 24px calc(24px + env(safe-area-inset-bottom));
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .shutter-wrap{display:flex; flex-direction:column; align-items:center; gap:6px;}
+  .shutter{
+    width:70px; height:70px; border-radius:50%; background:#fff; border:4px solid rgba(255,255,255,0.35);
+    cursor:pointer;
+  }
+  .shutter:active{ transform:scale(0.94); }
+  .shutter-label{color:#9CB3A2; font-size:10.5px; font-family:var(--mono); text-transform:uppercase; letter-spacing:.08em;}
+  .cam-side-btn{
+    background:rgba(255,255,255,0.1); border:none; color:#fff; padding:10px 14px; border-radius:12px;
+    font-size:12px; font-weight:600; display:flex; flex-direction:column; align-items:center; gap:4px; width:64px;
+  }
+  .cam-side-btn .ic{font-size:18px;}
+  .cam-done{
+    background:var(--sage-deep); color:#fff; border:none; border-radius:12px; padding:10px 16px;
+    font-size:13px; font-weight:700; opacity:.4; pointer-events:none;
+  }
+  .cam-done.active{opacity:1; pointer-events:all;}
+  .multi-toggle{
+    display:flex; align-items:center; gap:8px; margin:0 18px; padding:8px 12px;
+    background:rgba(255,255,255,0.08); border-radius:10px;
+  }
+  .multi-toggle label{color:#fff; font-size:12.5px; font-weight:600;}
+  .switch{position:relative; width:38px; height:22px; flex:0 0 auto;}
+  .switch input{opacity:0; width:0; height:0;}
+  .slider{position:absolute; inset:0; background:rgba(255,255,255,0.25); border-radius:20px; cursor:pointer; transition:.2s;}
+  .slider:before{content:""; position:absolute; height:16px; width:16px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.2s;}
+  input:checked + .slider{background:var(--sage);}
+  input:checked + .slider:before{transform:translateX(16px);}
+
+  /* ---------- Processing overlay ---------- */
+  .processing-view{
+    position:fixed; inset:0; background:rgba(15,20,17,0.94); z-index:110; display:none;
+    align-items:center; justify-content:center; flex-direction:column; color:#fff; padding:30px;
+  }
+  .processing-view.open{display:flex;}
+  .proc-ring{
+    width:64px; height:64px; border-radius:50%; border:3px solid rgba(255,255,255,0.15);
+    border-top-color:var(--sage); animation:spin 0.9s linear infinite; margin-bottom:22px;
+  }
+  @keyframes spin{ to{transform:rotate(360deg);} }
+  .proc-label{font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:#9CB3A2; margin-bottom:6px;}
+  .proc-file{font-size:15px; font-weight:600; text-align:center;}
+  .proc-progress{width:220px; height:4px; background:rgba(255,255,255,0.15); border-radius:4px; margin-top:20px; overflow:hidden;}
+  .proc-progress-fill{height:100%; background:var(--sage); width:0%; transition:width .2s;}
+  .proc-count{font-size:11px; color:#9CB3A2; margin-top:10px; font-family:var(--mono);}
+
+  /* ---------- Review form (sheet) ---------- */
+  .sheet-backdrop{
+    position:fixed; inset:0; background:rgba(20,26,22,0.5); z-index:120; display:none;
+  }
+  .sheet-backdrop.open{display:block;}
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; max-width:480px; margin:0 auto; z-index:121;
+    background:var(--paper); border-radius:22px 22px 0 0; max-height:92vh; overflow-y:auto;
+    transform:translateY(100%); transition:transform .28s cubic-bezier(.32,.72,0,1);
+    padding-bottom:calc(20px + env(safe-area-inset-bottom));
+  }
+  .sheet.open{transform:translateY(0);}
+  .sheet-handle{width:38px; height:4px; background:var(--rule); border-radius:4px; margin:10px auto 4px;}
+  .sheet-head{
+    display:flex; justify-content:space-between; align-items:center; padding:12px 20px 6px;
+  }
+  .sheet-head h2{font-size:17px; margin:0;}
+  .verify-flag{
+    display:flex; align-items:center; gap:6px; font-size:11px; font-weight:700;
+    padding:5px 10px; border-radius:8px; text-transform:uppercase; letter-spacing:.04em;
+  }
+  .verify-flag.needs{background:#F4E2D3; color:var(--amber);}
+  .verify-flag.ok{background:var(--sage-pale); color:var(--sage-deep);}
+  .sheet-close{background:var(--paper-dim); border:none; width:30px; height:30px; border-radius:50%; font-size:14px; cursor:pointer; color:var(--ink-soft);}
+
+  .receipt-preview-strip{
+    display:flex; gap:8px; padding:12px 20px; overflow-x:auto;
+  }
+  .receipt-preview-strip img{
+    height:96px; border-radius:10px; border:1px solid var(--rule); object-fit:cover;
+  }
+
+  .form-body{padding:6px 20px 4px;}
+  .field{margin-bottom:14px;}
+  .field label{
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--ink-soft); margin-bottom:6px;
+  }
+  .field label .conf{ font-family:var(--mono); font-size:10px; font-weight:700; text-transform:none; letter-spacing:0;}
+  .conf.low{color:var(--red);}
+  .conf.high{color:var(--sage-deep);}
+  .field input, .field select, .field textarea{
+    width:100%; padding:12px 13px; border-radius:11px; border:1.5px solid var(--rule);
+    font-size:15px; background:var(--card); color:var(--ink); font-family:inherit;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{
+    outline:none; border-color:var(--sage);
+  }
+  .field.flagged input, .field.flagged select{ border-color:var(--amber); background:#FCF6EE;}
+  .amount-row{display:flex; gap:8px;}
+  .amount-row .curr-select{flex:0 0 84px;}
+  .amount-row .amt-input{flex:1;}
+  .field textarea{resize:vertical; min-height:60px;}
+  .cat-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:8px;}
+  .cat-opt{
+    padding:10px 6px; border-radius:10px; border:1.5px solid var(--rule); background:var(--card);
+    font-size:12px; font-weight:600; text-align:center; cursor:pointer; color:var(--ink-soft);
+  }
+  .cat-opt.selected{ border-color:var(--sage-deep); background:var(--sage-pale); color:var(--sage-deep);}
+
+  .folder-select-row{display:flex; gap:8px; flex-wrap:wrap;}
+  .folder-opt{
+    padding:8px 12px; border-radius:10px; border:1.5px solid var(--rule); background:var(--card);
+    font-size:12.5px; font-weight:600; cursor:pointer; color:var(--ink-soft);
+  }
+  .folder-opt.selected{border-color:var(--ink); background:var(--ink); color:#fff;}
+
+  .sheet-actions{
+    display:flex; gap:10px; padding:16px 20px 4px;
+  }
+  .btn{
+    flex:1; padding:14px; border-radius:13px; border:none; font-size:14.5px; font-weight:700; cursor:pointer;
+  }
+  .btn.confirm{background:var(--sage-deep); color:#fff;}
+  .btn.delete{background:#F4E2DD; color:var(--red);}
+  .multi-nav{ display:flex; justify-content:space-between; align-items:center; padding:0 20px 10px; font-size:12px; color:var(--ink-soft); font-family:var(--mono);}
+
+  /* ---------- Storage / archive info sheet ---------- */
+  .info-sheet .form-body p{font-size:13.5px; line-height:1.6; color:var(--ink-soft);}
+  .info-sheet .form-body h4{font-size:13px; margin:16px 0 6px; color:var(--ink);}
+  .storage-opt{
+    display:flex; gap:12px; align-items:flex-start; padding:12px; border:1.5px solid var(--rule);
+    border-radius:12px; margin-bottom:10px; background:var(--card);
+  }
+  .storage-opt.selected{border-color:var(--sage-deep); background:var(--sage-pale);}
+  .storage-opt .ic{font-size:20px;}
+  .storage-opt strong{font-size:13.5px; display:block; margin-bottom:2px;}
+  .storage-opt span{font-size:12px; color:var(--ink-soft); line-height:1.4;}
+
+  /* toast */
+  .toast{
+    position:fixed; bottom:100px; left:50%; transform:translateX(-50%) translateY(20px); z-index:200;
+    background:var(--ink); color:var(--paper); padding:11px 18px; border-radius:12px; font-size:13px;
+    font-weight:600; opacity:0; transition:all .25s; pointer-events:none; white-space:nowrap;
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="brand">
+      <div>
+        <div class="brand-mark">Engineer of Things · Ledger</div>
+        <h1>Receipts</h1>
+      </div>
+      <div class="folder-chip" id="activeFolderChip">📁 Personal</div>
+    </div>
+    <div class="running-total">
+      <div>
+        <div class="sub">Total in view</div>
+        <div class="num"><span class="curr">AUD</span><span id="totalAmount">0.00</span></div>
+      </div>
+      <div class="sub" id="pendingSummary" style="margin-bottom:6px;">0 pending review</div>
+    </div>
+  </div>
+
+  <!-- FOLDER TABS -->
+  <div class="folders" id="folderTabs"></div>
+
+  <div class="section-label">
+    <span>This folder</span>
+    <span class="count" id="receiptCount">0</span>
+  </div>
+
+  <div class="receipt-list" id="receiptList"></div>
+  <div class="empty-state" id="emptyState" style="display:none;">
+    <div class="glyph">🧾</div>
+    <h3>No receipts here yet</h3>
+    <p>Capture or upload a receipt below to get started. Extracted data will be pre-filled for you to verify.</p>
+  </div>
+
+  <!-- CAPTURE BAR -->
+  <div class="capture-bar">
+    <button class="cap-btn secondary" id="btnLibrary">
+      <span class="ic">🖼️</span> Library
+    </button>
+    <button class="cap-btn primary" id="btnCamera">
+      <span class="ic">📷</span> Capture Receipt
+    </button>
+    <button class="cap-btn secondary" id="btnStorageInfo">
+      <span class="ic">☁️</span> Storage
+    </button>
+  </div>
+
+  <input type="file" id="fileInputLibrary" accept="image/*" multiple>
+  <input type="file" id="fileInputCameraFallback" accept="image/*" capture="environment">
+
+  <!-- CAMERA VIEW -->
+  <div class="camera-view" id="cameraView">
+    <div class="cam-top">
+      <div class="cam-title">Capture Receipt</div>
+      <button class="cam-close" id="camClose">✕</button>
+    </div>
+    <div class="cam-stage">
+      <video id="camVideo" autoplay playsinline muted></video>
+      <canvas id="camCanvas" style="display:none;"></canvas>
+      <div class="cam-frame-hint"></div>
+    </div>
+    <div class="cam-caps-strip" id="camCapsStrip"></div>
+    <div class="multi-toggle">
+      <label for="multiToggle">Multi-page receipt (keep camera open after each shot)</label>
+      <div class="switch">
+        <input type="checkbox" id="multiToggle">
+        <span class="slider"></span>
+      </div>
+    </div>
+    <div class="cam-controls">
+      <button class="cam-side-btn" id="camRetake"><span class="ic">↺</span>Clear</button>
+      <div class="shutter-wrap">
+        <div class="shutter" id="shutterBtn"></div>
+        <div class="shutter-label" id="shutterLabel">Tap to capture</div>
+      </div>
+      <button class="cam-done" id="camDone">Process</button>
+    </div>
+  </div>
+
+  <!-- PROCESSING OVERLAY -->
+  <div class="processing-view" id="processingView">
+    <div class="proc-ring"></div>
+    <div class="proc-label">Running OCR</div>
+    <div class="proc-file" id="procFileName">receipt_01.jpg</div>
+    <div class="proc-progress"><div class="proc-progress-fill" id="procFill"></div></div>
+    <div class="proc-count" id="procCount">Processing 1 of 1</div>
+  </div>
+
+  <!-- REVIEW SHEET -->
+  <div class="sheet-backdrop" id="sheetBackdrop"></div>
+  <div class="sheet" id="reviewSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2>Verify entry</h2>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="verify-flag needs" id="verifyFlag">⚠ Needs check</span>
+        <button class="sheet-close" id="sheetCloseBtn">✕</button>
+      </div>
+    </div>
+    <div class="multi-nav" id="multiNav" style="display:none;">
+      <span id="multiNavLabel">Receipt 1 of 1</span>
+      <span id="multiNavArrows">◀ swipe or use buttons ▶</span>
+    </div>
+    <div id="ocrErrorBanner" style="display:none; margin:0 20px 10px; padding:10px 12px; background:#F4E2DD; border-radius:10px; font-size:12.5px; color:#8A3A2C; line-height:1.4;"></div>
+
+    <div class="receipt-preview-strip" id="previewStrip"></div>
+
+    <div class="form-body">
+      <div class="field" id="fieldFolder">
+        <label>Folder</label>
+        <div class="folder-select-row" id="folderSelectRow"></div>
+      </div>
+
+      <div class="field" id="fieldDate">
+        <label>Date <span class="conf" id="confDate"></span></label>
+        <input type="date" id="inputDate">
+      </div>
+
+      <div class="field" id="fieldEstablishment">
+        <label>Establishment <span class="conf" id="confEst"></span></label>
+        <input type="text" id="inputEstablishment" placeholder="e.g. Bunnings Warehouse">
+      </div>
+
+      <div class="field" id="fieldAmount">
+        <label>Amount <span class="conf" id="confAmount"></span></label>
+        <div class="amount-row">
+          <select class="curr-select" id="inputCurrency">
+            <option value="AUD" selected>AUD</option>
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+            <option value="GBP">GBP</option>
+            <option value="NZD">NZD</option>
+          </select>
+          <input class="amt-input" type="number" step="0.01" id="inputAmount" placeholder="0.00">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Category</label>
+        <div class="cat-grid" id="catGrid"></div>
+      </div>
+
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="inputNotes" placeholder="Optional — job code, purpose, attendees..."></textarea>
+      </div>
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn delete" id="btnDiscard">Discard</button>
+      <button class="btn confirm" id="btnConfirm">Verify &amp; Save</button>
+    </div>
+  </div>
+
+  <!-- STORAGE INFO SHEET -->
+  <div class="sheet-backdrop" id="storageBackdrop"></div>
+  <div class="sheet info-sheet" id="storageSheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2>Archive &amp; storage</h2>
+      <button class="sheet-close" id="storageCloseBtn">✕</button>
+    </div>
+    <div class="form-body">
+      <p>In this prototype, receipts are stored locally in your browser (IndexedDB-style memory) so you can test the flow. In a production build, each verified receipt would sync automatically to a real backend so nothing lives only on one device.</p>
+      <h4>Recommended production setup</h4>
+      <div class="storage-opt selected">
+        <span class="ic">☁️</span>
+        <div><strong>Cloud object storage + database</strong><span>Original photos go to a bucket (e.g. Google Cloud Storage / S3 / Cloudflare R2), organised by folder/year/month. Extracted fields go into a proper database (e.g. Postgres via Supabase or Firebase) so they're searchable and reportable.</span></div>
+      </div>
+      <div class="storage-opt">
+        <span class="ic">🔗</span>
+        <div><strong>Connect your own Google Drive</strong><span>Simplest for a solo user — receipts save into folders like Drive/Receipts/Work/2026-07, with the sheet data mirrored to a Google Sheet for easy export to your accountant.</span></div>
+      </div>
+      <div class="storage-opt">
+        <span class="ic">🔒</span>
+        <div><strong>Encrypted local-first, optional sync</strong><span>Works offline on your phone; syncs to cloud only when connected. Best if you want data to stay private by default.</span></div>
+      </div>
+      <h4>What gets archived per receipt</h4>
+      <p>Original image(s), extracted fields, your verified/edited values, timestamp of verification, and folder/category — so every entry is fully auditable later.</p>
+
+      <h4>OCR engine (text extraction)</h4>
+      <p>This prototype uses <strong>OCR.space</strong> — a real, free OCR API (25,000 requests/month free tier). It's currently running on the shared public demo key, which is rate-limited and shared with other developers testing the same API, so you may occasionally see a "rate limit" error if a lot of people are testing it at once.</p>
+      <div class="field" style="margin-top:10px;">
+        <label>API key</label>
+        <input type="text" id="inputApiKey" placeholder="helloworld (demo key)">
+      </div>
+      <p style="margin-top:-6px;">Get your own free key in 30 seconds at <strong>ocr.space/ocrapi</strong> (no credit card) and paste it above — it's saved in this browser only and unlocks much higher limits.</p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ============================================================
+   STATE
+   ============================================================ */
+const FOLDERS = [
+  {id:'personal', label:'Personal', icon:'📁', color:'#7A9482'},
+  {id:'work', label:'Work', icon:'💼', color:'#4E6B58'},
+  {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
+  {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
+];
+const CATEGORIES = ['Meals','Fuel','Materials','Software','Travel','Utilities','Office','Tools','Parking','Subscriptions','Health','Misc'];
+
+let customFolders = [];
+let activeFolderId = 'personal';
+let receipts = []; // {id, folderId, date, establishment, amount, currency, category, notes, images:[dataURL], verified, needsCheck, confidences:{}}
+let receiptSeq = 1;
+
+// capture session state
+let mediaStream = null;
+let capturedImages = []; // dataURLs for current camera session
+let multiPageMode = false;
+
+// review session state
+let reviewQueue = []; // array of {images:[dataURL,...]} pending OCR+review, processed one at a time
+let currentReviewIndex = 0;
+let currentReviewDraft = null; // the receipt object being edited in the sheet
+let editingExistingId = null; // if reviewing an already-saved receipt
+
+/* ============================================================
+   INIT / SEED DATA
+   ============================================================ */
+function seedDemoData(){
+  receipts.push({
+    id: receiptSeq++, folderId:'work', date:'2026-07-02', establishment:'Officeworks',
+    amount:'64.50', currency:'AUD', category:'Office', notes:'Printer paper + folders for site audit',
+    images:[], verified:true, needsCheck:false
+  });
+  receipts.push({
+    id: receiptSeq++, folderId:'work', date:'2026-06-29', establishment:'BP Fuel',
+    amount:'112.30', currency:'AUD', category:'Fuel', notes:'', images:[], verified:true, needsCheck:false
+  });
+  receipts.push({
+    id: receiptSeq++, folderId:'personal', date:'2026-07-04', establishment:'Woolworths',
+    amount:'87.15', currency:'AUD', category:'Meals', notes:'', images:[], verified:true, needsCheck:false
+  });
+}
+seedDemoData();
+
+/* ============================================================
+   RENDER: FOLDER TABS
+   ============================================================ */
+function allFolders(){ return [...FOLDERS, ...customFolders]; }
+
+function renderFolderTabs(){
+  const el = document.getElementById('folderTabs');
+  el.innerHTML = '';
+  allFolders().forEach(f=>{
+    const btn = document.createElement('button');
+    btn.className = 'folder-btn' + (f.id===activeFolderId ? ' active':'');
+    btn.innerHTML = `<span class="dot" style="background:${f.color}"></span>${f.icon} ${f.label}`;
+    btn.onclick = ()=>{ activeFolderId = f.id; renderAll(); };
+    el.appendChild(btn);
+  });
+  const addBtn = document.createElement('button');
+  addBtn.className = 'folder-btn add';
+  addBtn.innerText = '+ New folder';
+  addBtn.onclick = ()=>{
+    const name = prompt('Name your custom folder (e.g. "Renovation", "Rental Property")');
+    if(name && name.trim()){
+      const id = 'custom_'+Date.now();
+      customFolders.push({id, label:name.trim(), icon:'🗃️', color:'#8C7AA9'});
+      activeFolderId = id;
+      renderAll();
+    }
+  };
+  el.appendChild(addBtn);
+
+  const folderMeta = allFolders().find(f=>f.id===activeFolderId);
+  document.getElementById('activeFolderChip').innerText = `${folderMeta.icon} ${folderMeta.label}`;
+}
+
+/* ============================================================
+   RENDER: RECEIPT LIST
+   ============================================================ */
+function renderReceiptList(){
+  const list = receipts.filter(r=>r.folderId===activeFolderId).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  const el = document.getElementById('receiptList');
+  const empty = document.getElementById('emptyState');
+  el.innerHTML = '';
+  document.getElementById('receiptCount').innerText = list.length;
+
+  if(list.length===0){ empty.style.display='block'; }
+  else{ empty.style.display='none'; }
+
+  let total = 0;
+  let pending = 0;
+  list.forEach(r=>{
+    const amt = parseFloat(r.amount)||0;
+    if(r.currency==='AUD') total += amt;
+    if(r.needsCheck || !r.verified) pending++;
+
+    const card = document.createElement('div');
+    card.className = 'receipt-card';
+    const folderMeta = allFolders().find(f=>f.id===r.folderId) || FOLDERS[0];
+    card.innerHTML = `
+      <div class="accent" style="background:${folderMeta.color}"></div>
+      <div class="thumb">${r.images && r.images[0] ? `<img src="${r.images[0]}">` : '🧾'}</div>
+      <div class="r-info">
+        <div class="r-name">${escapeHtml(r.establishment || 'Unnamed receipt')}</div>
+        <div class="r-meta">
+          <span>${formatDate(r.date)}</span>
+          <span class="cat-pill" style="background:${categoryColor(r.category)}22; color:${categoryColor(r.category)}">${r.category||'Uncategorised'}</span>
+        </div>
+      </div>
+      <div class="r-amount">
+        ${r.currency||'AUD'} ${parseFloat(r.amount||0).toFixed(2)}
+        <span class="status ${r.needsCheck ? 'pending':'verified'}">${r.needsCheck ? '⚠ Review' : '✓ Verified'}</span>
+      </div>
+    `;
+    card.onclick = ()=> openReviewForExisting(r.id);
+    el.appendChild(card);
+  });
+
+  document.getElementById('totalAmount').innerText = total.toFixed(2);
+  document.getElementById('pendingSummary').innerText = `${pending} pending review`;
+}
+
+function categoryColor(cat){
+  const palette = {Meals:'#C48A3F', Fuel:'#4E6B58', Materials:'#7A9482', Software:'#5B7FA6', Travel:'#8C7AA9', Utilities:'#B0503F', Office:'#4E6B58', Tools:'#7A9482', Parking:'#C48A3F', Subscriptions:'#5B7FA6', Health:'#B0503F', Misc:'#5B6B60'};
+  return palette[cat] || '#5B6B60';
+}
+function formatDate(d){
+  if(!d) return '—';
+  const dt = new Date(d+'T00:00:00');
+  return dt.toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
+}
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function renderAll(){ renderFolderTabs(); renderReceiptList(); }
+renderAll();
+
+/* ============================================================
+   CAMERA
+   ============================================================ */
+const cameraView = document.getElementById('cameraView');
+const camVideo = document.getElementById('camVideo');
+const camCanvas = document.getElementById('camCanvas');
+
+async function openCamera(){
+  capturedImages = [];
+  renderCapsStrip();
+  cameraView.classList.add('open');
+  try{
+    mediaStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment', width:{ideal:1600}, height:{ideal:2000} }, audio:false });
+    camVideo.srcObject = mediaStream;
+  }catch(err){
+    // Fallback: no camera access (common in sandboxed/desktop testing) — use file input with capture attribute
+    cameraView.classList.remove('open');
+    document.getElementById('fileInputCameraFallback').click();
+  }
+}
+
+function closeCamera(){
+  cameraView.classList.remove('open');
+  if(mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
+}
+
+document.getElementById('btnCamera').onclick = openCamera;
+document.getElementById('camClose').onclick = closeCamera;
+
+document.getElementById('shutterBtn').onclick = ()=>{
+  const w = camVideo.videoWidth, h = camVideo.videoHeight;
+  if(!w || !h) return;
+  camCanvas.width = w; camCanvas.height = h;
+  const ctx = camCanvas.getContext('2d');
+  ctx.drawImage(camVideo, 0, 0, w, h);
+  const dataUrl = camCanvas.toDataURL('image/jpeg', 0.85);
+  capturedImages.push(dataUrl);
+  renderCapsStrip();
+
+  multiPageMode = document.getElementById('multiToggle').checked;
+  document.getElementById('shutterLabel').innerText = multiPageMode ? 'Page captured — keep going' : 'Tap to capture another';
+  flashShutter();
+};
+
+function flashShutter(){
+  cameraView.style.background = '#fff';
+  setTimeout(()=>{ cameraView.style.background = '#0D120E'; }, 90);
+}
+
+function renderCapsStrip(){
+  const strip = document.getElementById('camCapsStrip');
+  strip.innerHTML='';
+  capturedImages.forEach((img,i)=>{
+    const el = document.createElement('img');
+    el.src = img; el.className='cap-thumb';
+    strip.appendChild(el);
+  });
+  document.getElementById('camDone').classList.toggle('active', capturedImages.length>0);
+  document.getElementById('camDone').innerText = capturedImages.length>1 ? `Process (${capturedImages.length})` : 'Process';
+}
+
+document.getElementById('camRetake').onclick = ()=>{
+  capturedImages = [];
+  renderCapsStrip();
+  document.getElementById('shutterLabel').innerText = 'Tap to capture';
+};
+
+document.getElementById('camDone').onclick = ()=>{
+  if(capturedImages.length===0) return;
+  const multi = document.getElementById('multiToggle').checked;
+  closeCamera();
+  if(multi){
+    // treat all captured images as ONE multi-page receipt
+    queueReceiptForOCR([...capturedImages]);
+  } else {
+    // treat each captured image as its OWN receipt (bulk single-page capture)
+    capturedImages.forEach(img=> queueReceiptForOCR([img]));
+  }
+  capturedImages = [];
+  processQueue();
+};
+
+/* ---- Library upload ---- */
+document.getElementById('btnLibrary').onclick = ()=> document.getElementById('fileInputLibrary').click();
+
+document.getElementById('fileInputLibrary').addEventListener('change', async (e)=>{
+  const files = Array.from(e.target.files);
+  if(files.length===0) return;
+  for(const f of files){
+    const dataUrl = await fileToDataUrl(f);
+    queueReceiptForOCR([dataUrl]); // each uploaded file = its own receipt for bulk processing
+  }
+  e.target.value = '';
+  processQueue();
+});
+
+document.getElementById('fileInputCameraFallback').addEventListener('change', async (e)=>{
+  const files = Array.from(e.target.files);
+  if(files.length===0) return;
+  const dataUrl = await fileToDataUrl(files[0]);
+  queueReceiptForOCR([dataUrl]);
+  e.target.value='';
+  processQueue();
+});
+
+function fileToDataUrl(file){
+  return new Promise((resolve)=>{
+    const reader = new FileReader();
+    reader.onload = ()=> resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ============================================================
+   OCR QUEUE + PROCESSING
+   ============================================================ */
+let ocrQueue = []; // array of {images:[...]}
+let isProcessing = false;
+
+function queueReceiptForOCR(images){
+  ocrQueue.push({images});
+}
+
+async function processQueue(){
+  if(isProcessing || ocrQueue.length===0) return;
+  isProcessing = true;
+  const total = ocrQueue.length;
+  const processingView = document.getElementById('processingView');
+  processingView.classList.add('open');
+
+  const results = [];
+  let idx = 0;
+  while(ocrQueue.length){
+    idx++;
+    const item = ocrQueue.shift();
+    document.getElementById('procFileName').innerText = item.images.length>1 ? `Multi-page receipt (${item.images.length} pages)` : `Receipt ${idx} of ${total}`;
+    document.getElementById('procCount').innerText = `Processing ${idx} of ${total}`;
+    document.getElementById('procFill').style.width = `${Math.round(((idx-1)/total)*100)}%`;
+
+    const extracted = await runOCROnImages(item.images, (p)=>{
+      document.getElementById('procFill').style.width = `${Math.round((((idx-1)+p)/total)*100)}%`;
+    });
+
+    results.push({
+      images: item.images,
+      ...extracted
+    });
+  }
+
+  document.getElementById('procFill').style.width = '100%';
+  processingView.classList.remove('open');
+  isProcessing = false;
+
+  // load results into the review queue
+  reviewQueue = results;
+  currentReviewIndex = 0;
+  editingExistingId = null;
+  if(reviewQueue.length){
+    openReviewSheetForIndex(0);
+  }
+}
+
+function getApiKey(){
+  return (localStorage.getItem('ocrspace_key') || '').trim() || 'helloworld';
+}
+
+// Convert a dataURL (e.g. from canvas.toDataURL or FileReader) to a Blob for upload
+function dataUrlToBlob(dataUrl){
+  const [header, b64] = dataUrl.split(',');
+  const mime = header.match(/data:(.*?);base64/)[1];
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], {type:mime});
+}
+
+async function ocrSpaceRecognize(dataUrl, attempt=1){
+  const blob = dataUrlToBlob(dataUrl);
+  const form = new FormData();
+  form.append('apikey', getApiKey());
+  form.append('file', blob, 'receipt.jpg');
+  form.append('language', 'eng');
+  form.append('OCREngine', '2');      // engine 2 is better for receipts/mixed layouts
+  form.append('scale', 'true');
+  form.append('isTable', 'true');     // helps line-item / column alignment on receipts
+
+  let res;
+  try{
+    res = await fetch('https://api.ocr.space/parse/image', { method:'POST', body: form });
+  }catch(networkErr){
+    throw new Error('NETWORK: Could not reach OCR.space. Check your internet connection.');
+  }
+
+  if(!res.ok){
+    if(res.status===403 || res.status===401){
+      throw new Error('AUTH: API key was rejected. Check the key in Storage settings.');
+    }
+    if((res.status===429 || res.status===503) && attempt<3){
+      await new Promise(r=>setTimeout(r, 1200*attempt));
+      return ocrSpaceRecognize(dataUrl, attempt+1);
+    }
+    throw new Error(`HTTP_${res.status}: OCR service returned an error.`);
+  }
+
+  const json = await res.json();
+
+  if(json.IsErroredOnProcessing){
+    const msg = (json.ErrorMessage && json.ErrorMessage.join(', ')) || json.ErrorDetails || 'Unknown OCR error';
+    // Rate-limit on the shared demo key often comes back as a processing error, not an HTTP error
+    if(/rate|limit|timed? ?out/i.test(msg) && attempt<3){
+      await new Promise(r=>setTimeout(r, 1500*attempt));
+      return ocrSpaceRecognize(dataUrl, attempt+1);
+    }
+    throw new Error(`OCR_ENGINE: ${msg}`);
+  }
+
+  const parsedText = (json.ParsedResults || []).map(r=>r.ParsedText).join('\n');
+  return parsedText;
+}
+
+async function runOCROnImages(images, onProgress){
+  let fullText = '';
+  let lastError = null;
+  let successCount = 0;
+
+  for(let i=0;i<images.length;i++){
+    try{
+      const text = await ocrSpaceRecognize(images[i]);
+      fullText += '\n' + text;
+      successCount++;
+    }catch(err){
+      console.error('OCR error on image', i, err);
+      lastError = err;
+    }
+    if(onProgress) onProgress((i+1)/images.length);
+  }
+
+  const result = parseReceiptText(fullText);
+
+  if(successCount===0 && lastError){
+    // total failure — surface this clearly rather than silently returning empty fields
+    result.ocrFailed = true;
+    result.ocrErrorMessage = friendlyOcrError(lastError.message);
+    result.needsCheck = true;
+  } else if(lastError){
+    // partial failure across a multi-page receipt
+    result.ocrPartialError = friendlyOcrError(lastError.message);
+  }
+
+  return result;
+}
+
+function friendlyOcrError(raw){
+  if(/NETWORK/.test(raw)) return "Couldn't reach the OCR service — check your connection and try again.";
+  if(/AUTH/.test(raw)) return "The API key was rejected — check it in the Storage panel.";
+  if(/rate|limit/i.test(raw)) return "The shared demo key is rate-limited right now — try again in a minute, or add your own free key in Storage settings.";
+  if(/HTTP_5/.test(raw)) return "The OCR service is temporarily unavailable — try again shortly.";
+  return "OCR couldn't read this image clearly — you can still fill the form in manually.";
+}
+
+/* ---- Naive-but-useful receipt text parser ---- */
+function parseReceiptText(text){
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+  const confidences = {};
+
+  // --- Amount: look for the largest currency-like number, prefer lines with TOTAL ---
+  let amount = '';
+  let bestTotalLine = lines.find(l=> /total/i.test(l) && !/sub ?total/i.test(l));
+  const moneyRegex = /\$?\s?(\d{1,4}[.,]\d{2})\b/;
+  if(bestTotalLine){
+    const m = bestTotalLine.match(moneyRegex);
+    if(m){ amount = m[1].replace(',', '.'); confidences.amount='high'; }
+  }
+  if(!amount){
+    // fallback: grab the largest number that looks like money anywhere in text
+    let candidates = [];
+    lines.forEach(l=>{
+      const matches = l.match(/\$?\s?\d{1,4}[.,]\d{2}\b/g);
+      if(matches) candidates.push(...matches.map(m=>parseFloat(m.replace('$','').replace(',','.'))));
+    });
+    if(candidates.length){
+      amount = Math.max(...candidates).toFixed(2);
+      confidences.amount = 'low';
+    } else {
+      confidences.amount = 'low';
+    }
+  }
+
+  // --- Date: look for common date patterns ---
+  let date = '';
+  const dateRegexes = [
+    /\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/,
+    /\b(\d{4})-(\d{2})-(\d{2})\b/
+  ];
+  for(const l of lines){
+    let m = l.match(dateRegexes[1]);
+    if(m){ date = `${m[1]}-${m[2]}-${m[3]}`; confidences.date='high'; break; }
+    m = l.match(dateRegexes[0]);
+    if(m){
+      let [_, a, b, y] = m;
+      if(y.length===2) y = '20'+y;
+      // assume DD/MM/YYYY (AU convention)
+      let dd = a.padStart(2,'0'), mm = b.padStart(2,'0');
+      if(parseInt(dd)>31 || parseInt(mm)>12){ [dd,mm] = [mm,dd]; }
+      date = `${y}-${mm}-${dd}`;
+      confidences.date = 'medium';
+      break;
+    }
+  }
+  if(!date){
+    date = new Date().toISOString().slice(0,10);
+    confidences.date = 'low';
+  }
+
+  // --- Establishment: usually the first meaningful line (often ALL CAPS or largest text) ---
+  let establishment = '';
+  const junkPattern = /^(tax invoice|receipt|invoice|abn|gst|thank you|www\.|http)/i;
+  for(const l of lines){
+    if(l.length>=3 && l.length<=40 && !junkPattern.test(l) && !/^\d+$/.test(l)){
+      establishment = l.replace(/[^a-zA-Z0-9 &'.\-]/g, '').trim();
+      if(establishment.length>=3){ confidences.establishment='medium'; break; }
+    }
+  }
+  if(!establishment){ establishment=''; confidences.establishment='low'; }
+  else if(establishment === establishment.toUpperCase() && establishment.length>2){
+    confidences.establishment='high';
+  }
+
+  // --- Category guess based on keywords ---
+  let category = 'Misc';
+  const catMap = {
+    Meals:['cafe','restaurant','kitchen','coffee','bar','eatery','food','grill'],
+    Fuel:['fuel','bp ','shell','caltex','ampol','petrol','7-eleven'],
+    Materials:['bunnings','hardware','timber','steel','trade'],
+    Software:['software','subscription','saas','adobe','microsoft','google'],
+    Travel:['uber','taxi','airline','airport','hotel','qantas','jetstar'],
+    Office:['officeworks','office','stationery'],
+    Parking:['parking','secure park','wilson'],
+  };
+  const lowerText = text.toLowerCase();
+  for(const [cat, keywords] of Object.entries(catMap)){
+    if(keywords.some(k=>lowerText.includes(k))){ category = cat; break; }
+  }
+
+  const overallLow = confidences.amount==='low' || confidences.date==='low' || confidences.establishment==='low';
+
+  return {
+    date, establishment, amount, currency:'AUD', category, notes:'',
+    confidences, needsCheck: overallLow
+  };
+}
+
+/* ============================================================
+   REVIEW SHEET
+   ============================================================ */
+const reviewSheet = document.getElementById('reviewSheet');
+const sheetBackdrop = document.getElementById('sheetBackdrop');
+
+function renderFolderSelectRow(selectedId){
+  const row = document.getElementById('folderSelectRow');
+  row.innerHTML='';
+  allFolders().forEach(f=>{
+    const btn = document.createElement('div');
+    btn.className = 'folder-opt' + (f.id===selectedId ? ' selected':'');
+    btn.innerText = `${f.icon} ${f.label}`;
+    btn.onclick = ()=>{
+      currentReviewDraft.folderId = f.id;
+      renderFolderSelectRow(f.id);
+    };
+    row.appendChild(btn);
+  });
+}
+
+function renderCatGrid(selectedCat){
+  const grid = document.getElementById('catGrid');
+  grid.innerHTML='';
+  CATEGORIES.forEach(cat=>{
+    const btn = document.createElement('div');
+    btn.className = 'cat-opt' + (cat===selectedCat ? ' selected':'');
+    btn.innerText = cat;
+    btn.onclick = ()=>{
+      currentReviewDraft.category = cat;
+      renderCatGrid(cat);
+    };
+    grid.appendChild(btn);
+  });
+}
+
+function confBadge(elId, level){
+  const el = document.getElementById(elId);
+  if(!level || level==='high'){ el.innerText=''; return; }
+  if(level==='medium'){ el.innerText='● check'; el.className='conf'; el.style.color='var(--amber)'; return; }
+  el.innerText='● low confidence'; el.className='conf low';
+}
+
+function openReviewSheetForIndex(i){
+  currentReviewIndex = i;
+  const item = reviewQueue[i];
+  currentReviewDraft = {
+    folderId: activeFolderId,
+    date: item.date,
+    establishment: item.establishment,
+    amount: item.amount,
+    currency: item.currency,
+    category: item.category,
+    notes: item.notes,
+    images: item.images,
+    needsCheck: item.needsCheck,
+    confidences: item.confidences || {}
+  };
+  populateSheet();
+  document.getElementById('multiNav').style.display = reviewQueue.length>1 ? 'flex':'none';
+  document.getElementById('multiNavLabel').innerText = `Receipt ${i+1} of ${reviewQueue.length}`;
+  openSheet();
+}
+
+function openReviewForExisting(id){
+  const r = receipts.find(x=>x.id===id);
+  if(!r) return;
+  editingExistingId = id;
+  reviewQueue = [];
+  currentReviewDraft = { ...r };
+  populateSheet();
+  document.getElementById('multiNav').style.display='none';
+  openSheet();
+}
+
+function populateSheet(){
+  const d = currentReviewDraft;
+  document.getElementById('verifyFlag').className = 'verify-flag ' + (d.needsCheck ? 'needs':'ok');
+  document.getElementById('verifyFlag').innerText = d.needsCheck ? '⚠ Needs check' : '✓ Looks good';
+
+  const banner = document.getElementById('ocrErrorBanner');
+  if(d.ocrFailed){
+    banner.style.display = 'block';
+    banner.innerHTML = `<strong>OCR couldn't process this receipt.</strong><br>${d.ocrErrorMessage || 'Please fill in the fields manually below.'}`;
+  } else if(d.ocrPartialError){
+    banner.style.display = 'block';
+    banner.innerHTML = `<strong>One page didn't scan properly.</strong><br>${d.ocrPartialError}`;
+  } else {
+    banner.style.display = 'none';
+  }
+
+  const strip = document.getElementById('previewStrip');
+  strip.innerHTML='';
+  (d.images||[]).forEach(img=>{
+    const el = document.createElement('img');
+    el.src = img;
+    strip.appendChild(el);
+  });
+  if(!d.images || d.images.length===0){
+    strip.innerHTML = '<div style="font-size:12px;color:var(--ink-soft);padding:8px 0;">No image attached to this entry.</div>';
+  }
+
+  renderFolderSelectRow(d.folderId);
+  document.getElementById('inputDate').value = d.date || '';
+  document.getElementById('inputEstablishment').value = d.establishment || '';
+  document.getElementById('inputAmount').value = d.amount || '';
+  document.getElementById('inputCurrency').value = d.currency || 'AUD';
+  document.getElementById('inputNotes').value = d.notes || '';
+  renderCatGrid(d.category);
+
+  const c = d.confidences || {};
+  confBadge('confDate', c.date);
+  confBadge('confEst', c.establishment);
+  confBadge('confAmount', c.amount);
+
+  document.getElementById('fieldDate').classList.toggle('flagged', c.date==='low');
+  document.getElementById('fieldEstablishment').classList.toggle('flagged', c.establishment==='low');
+  document.getElementById('fieldAmount').classList.toggle('flagged', c.amount==='low');
+}
+
+function openSheet(){
+  sheetBackdrop.classList.add('open');
+  reviewSheet.classList.add('open');
+}
+function closeSheet(){
+  sheetBackdrop.classList.remove('open');
+  reviewSheet.classList.remove('open');
+}
+
+document.getElementById('sheetCloseBtn').onclick = ()=>{
+  if(confirm('Discard changes and close?')) { closeSheet(); }
+};
+sheetBackdrop.onclick = ()=>{ closeSheet(); };
+
+document.getElementById('btnDiscard').onclick = ()=>{
+  if(!confirm('Discard this receipt entry? This cannot be undone.')) return;
+  if(editingExistingId){
+    receipts = receipts.filter(r=>r.id!==editingExistingId);
+    editingExistingId = null;
+    closeSheet();
+    renderAll();
+    showToast('Receipt deleted');
+  } else {
+    advanceReviewQueueOrClose();
+    showToast('Receipt discarded');
+  }
+};
+
+document.getElementById('btnConfirm').onclick = ()=>{
+  // pull latest field values into draft
+  currentReviewDraft.date = document.getElementById('inputDate').value;
+  currentReviewDraft.establishment = document.getElementById('inputEstablishment').value.trim();
+  currentReviewDraft.amount = document.getElementById('inputAmount').value;
+  currentReviewDraft.currency = document.getElementById('inputCurrency').value;
+  currentReviewDraft.notes = document.getElementById('inputNotes').value.trim();
+
+  if(!currentReviewDraft.establishment){
+    alert('Please add an establishment name before saving.');
+    return;
+  }
+  if(!currentReviewDraft.amount){
+    alert('Please add an amount before saving.');
+    return;
+  }
+
+  if(editingExistingId){
+    const i = receipts.findIndex(r=>r.id===editingExistingId);
+    receipts[i] = { ...currentReviewDraft, id:editingExistingId, verified:true, needsCheck:false };
+    editingExistingId = null;
+    closeSheet();
+    renderAll();
+    showToast('Receipt updated ✓');
+  } else {
+    receipts.push({ ...currentReviewDraft, id:receiptSeq++, verified:true, needsCheck:false });
+    showToast(`Saved & archived ✓ (${reviewQueue.length - currentReviewIndex - 1} remaining)`);
+    advanceReviewQueueOrClose();
+  }
+};
+
+function advanceReviewQueueOrClose(){
+  if(currentReviewIndex < reviewQueue.length - 1){
+    openReviewSheetForIndex(currentReviewIndex + 1);
+  } else {
+    reviewQueue = [];
+    closeSheet();
+    renderAll();
+  }
+}
+
+/* ============================================================
+   STORAGE INFO SHEET
+   ============================================================ */
+const storageSheet = document.getElementById('storageSheet');
+const storageBackdrop = document.getElementById('storageBackdrop');
+document.getElementById('btnStorageInfo').onclick = ()=>{
+  document.getElementById('inputApiKey').value = localStorage.getItem('ocrspace_key') || '';
+  storageBackdrop.classList.add('open');
+  storageSheet.classList.add('open');
+};
+document.getElementById('inputApiKey').addEventListener('change', (e)=>{
+  const val = e.target.value.trim();
+  if(val) localStorage.setItem('ocrspace_key', val);
+  else localStorage.removeItem('ocrspace_key');
+  showToast(val ? 'API key saved to this browser' : 'Reverted to shared demo key');
+});
+document.getElementById('storageCloseBtn').onclick = ()=>{
+  storageBackdrop.classList.remove('open');
+  storageSheet.classList.remove('open');
+};
+storageBackdrop.onclick = ()=>{
+  storageBackdrop.classList.remove('open');
+  storageSheet.classList.remove('open');
+};
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+let toastTimer;
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.innerText = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> t.classList.remove('show'), 2600);
+}
+</script>
+</body>
+</html>
