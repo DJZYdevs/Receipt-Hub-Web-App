@@ -459,6 +459,11 @@
         <label>Notes</label>
         <textarea id="inputNotes" placeholder="Optional — job code, purpose, attendees..."></textarea>
       </div>
+
+      <details id="rawOcrDetails" style="margin-top:4px; margin-bottom:8px;">
+        <summary style="font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-soft); cursor:pointer;">Raw OCR text (debug)</summary>
+        <pre id="rawOcrText" style="white-space:pre-wrap; font-size:11.5px; background:var(--card); border:1px solid var(--rule); border-radius:10px; padding:10px; margin-top:8px; max-height:180px; overflow-y:auto; color:var(--ink-soft); font-family:var(--mono);"></pre>
+      </details>
     </div>
 
     <div class="sheet-actions">
@@ -885,6 +890,7 @@ async function runOCROnImages(images, onProgress){
   }
 
   const result = parseReceiptText(fullText);
+  result.rawOcrText = fullText.trim();
 
   if(successCount===0 && lastError){
     // total failure — surface this clearly rather than silently returning empty fields
@@ -914,16 +920,20 @@ function parseReceiptText(text){
 
   // --- Amount: look for the largest currency-like number, prefer lines with TOTAL ---
   let amount = '';
-  let bestTotalLine = lines.find(l=> /total/i.test(l) && !/sub ?total/i.test(l));
+  const excludeTotalPattern = /sub ?total|saved|savings|points|balance|change|gst|tax\b|item count|qty/i;
+  const totalLines = lines.filter(l=> /\btotal\b/i.test(l) && !excludeTotalPattern.test(l));
   const moneyRegex = /\$?\s?(\d{1,4}[.,]\d{2})\b/;
-  if(bestTotalLine){
-    const m = bestTotalLine.match(moneyRegex);
+  if(totalLines.length){
+    // prefer the LAST matching total line — grand total usually printed after subtotal/tax breakdown
+    const lastTotalLine = totalLines[totalLines.length-1];
+    const m = lastTotalLine.match(moneyRegex);
     if(m){ amount = m[1].replace(',', '.'); confidences.amount='high'; }
   }
   if(!amount){
     // fallback: grab the largest number that looks like money anywhere in text
     let candidates = [];
     lines.forEach(l=>{
+      if(excludeTotalPattern.test(l)) return;
       const matches = l.match(/\$?\s?\d{1,4}[.,]\d{2}\b/g);
       if(matches) candidates.push(...matches.map(m=>parseFloat(m.replace('$','').replace(',','.'))));
     });
@@ -961,35 +971,71 @@ function parseReceiptText(text){
     confidences.date = 'low';
   }
 
-  // --- Establishment: usually the first meaningful line (often ALL CAPS or largest text) ---
+  // --- Establishment: score candidate lines instead of just taking the first plausible one ---
   let establishment = '';
-  const junkPattern = /^(tax invoice|receipt|invoice|abn|gst|thank you|www\.|http)/i;
-  for(const l of lines){
-    if(l.length>=3 && l.length<=40 && !junkPattern.test(l) && !/^\d+$/.test(l)){
-      establishment = l.replace(/[^a-zA-Z0-9 &'.\-]/g, '').trim();
-      if(establishment.length>=3){ confidences.establishment='medium'; break; }
-    }
-  }
-  if(!establishment){ establishment=''; confidences.establishment='low'; }
-  else if(establishment === establishment.toUpperCase() && establishment.length>2){
-    confidences.establishment='high';
+  const junkPattern = /^(tax invoice|invoice|receipt|abn|acn|gst|thank you|thanks for|www\.|http|tel:|phone|ph:|customer (copy|details)|loyalty|card|eftpos|change|balance|cashier|operator|store\s?#|reg(ister)?\s?\d|welcome to|have a|see you|survey|feedback|your (receipt|opinion))/i;
+  const addressPattern = /\b(street|st\.|road|rd\.|avenue|ave\.|drive|dr\.|highway|hwy|suite|unit|level|shop\s?\d|nsw|vic|qld|wa|sa|tas|act|nt)\b/i;
+  const looksLikeDate = /\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/;
+  const looksLikeTime = /\d{1,2}:\d{2}/;
+  const looksLikePhone = /\(?\d{2,4}\)?[\s-]?\d{3,4}[\s-]?\d{3,4}/;
+
+  const candidates = [];
+  // only look at the first ~12 lines — establishment name is always near the top of a receipt
+  lines.slice(0, 12).forEach((l, idx)=>{
+    const clean = l.replace(/[^a-zA-Z0-9 &'.,\-]/g, '').trim();
+    if(clean.length<3 || clean.length>40) return;
+    if(junkPattern.test(clean)) return;
+    if(addressPattern.test(clean)) return;
+    if(looksLikeDate.test(clean) || looksLikeTime.test(clean) || looksLikePhone.test(clean)) return;
+    if(/^\d+$/.test(clean)) return;
+    if(/^[\d\s.,$-]+$/.test(clean)) return; // pure numbers/money, not a name
+    const letterCount = (clean.match(/[a-zA-Z]/g)||[]).length;
+    if(letterCount < clean.length * 0.5) return; // too many symbols/digits to be a name
+
+    let score = 0;
+    score += Math.max(0, 6 - idx);              // earlier lines score higher
+    if(clean === clean.toUpperCase()) score += 4; // store names often printed in caps
+    if(/^[A-Z]/.test(clean)) score += 1;
+    if(clean.split(' ').length <= 5) score += 2;  // short phrases more likely to be a name
+    if(/pty ltd|pty\.? ltd\.?|limited|inc\.?/i.test(clean)) score += 1;
+
+    candidates.push({ text: clean, score, idx });
+  });
+
+  candidates.sort((a,b)=> b.score - a.score);
+  if(candidates.length){
+    establishment = candidates[0].text;
+    confidences.establishment = candidates[0].score >= 6 ? 'high' : (candidates[0].score >= 3 ? 'medium' : 'low');
+  } else {
+    establishment = '';
+    confidences.establishment = 'low';
   }
 
-  // --- Category guess based on keywords ---
+  // --- Category guess based on keywords, scored across whole receipt text (not first match wins) ---
   let category = 'Misc';
   const catMap = {
-    Meals:['cafe','restaurant','kitchen','coffee','bar','eatery','food','grill'],
-    Fuel:['fuel','bp ','shell','caltex','ampol','petrol','7-eleven'],
-    Materials:['bunnings','hardware','timber','steel','trade'],
-    Software:['software','subscription','saas','adobe','microsoft','google'],
-    Travel:['uber','taxi','airline','airport','hotel','qantas','jetstar'],
-    Office:['officeworks','office','stationery'],
-    Parking:['parking','secure park','wilson'],
+    Meals:['cafe','restaurant','kitchen','coffee','bar ','eatery','food','grill','bakery','pizzeria','sushi','diner','bistro','pub','takeaway'],
+    Fuel:['fuel','bp ',' bp','shell','caltex','ampol','petrol','7-eleven','united petroleum'],
+    Materials:['bunnings','hardware','timber','steel','trade','mitre 10','tools warehouse'],
+    Software:['software','subscription','saas','adobe','microsoft','google','apple.com/bill','app store','openai','anthropic'],
+    Travel:['uber','taxi','airline','airport','hotel','qantas','jetstar','virgin australia','airbnb','booking.com','car rental','avis','hertz'],
+    Office:['officeworks','office national','stationery'],
+    Tools:['tool', 'toolstop', 'sydney tools', 'total tools'],
+    Parking:['parking','secure park','wilson parking','care park'],
+    Subscriptions:['netflix','spotify','subscription','membership renewal'],
+    Health:['pharmacy','chemist','medical','clinic','physio','dental'],
+    Groceries:['woolworths','coles','aldi','iga','foodworks','supermarket'],
   };
   const lowerText = text.toLowerCase();
+  let bestCat = {name:'Misc', hits:0};
   for(const [cat, keywords] of Object.entries(catMap)){
-    if(keywords.some(k=>lowerText.includes(k))){ category = cat; break; }
+    let hits = 0;
+    keywords.forEach(k=>{ if(lowerText.includes(k)) hits++; });
+    if(hits > bestCat.hits) bestCat = {name:cat, hits};
   }
+  category = bestCat.hits > 0 ? bestCat.name : 'Misc';
+  // add Groceries to the pill palette set used elsewhere if not already categorised
+  if(!CATEGORIES.includes(category)) CATEGORIES.push(category);
 
   const overallLow = confidences.amount==='low' || confidences.date==='low' || confidences.establishment==='low';
 
@@ -1055,7 +1101,8 @@ function openReviewSheetForIndex(i){
     notes: item.notes,
     images: item.images,
     needsCheck: item.needsCheck,
-    confidences: item.confidences || {}
+    confidences: item.confidences || {},
+    rawOcrText: item.rawOcrText || ''
   };
   populateSheet();
   document.getElementById('multiNav').style.display = reviewQueue.length>1 ? 'flex':'none';
@@ -1113,6 +1160,8 @@ function populateSheet(){
   confBadge('confDate', c.date);
   confBadge('confEst', c.establishment);
   confBadge('confAmount', c.amount);
+
+  document.getElementById('rawOcrText').innerText = d.rawOcrText || '(no OCR text captured for this entry)';
 
   document.getElementById('fieldDate').classList.toggle('flagged', c.date==='low');
   document.getElementById('fieldEstablishment').classList.toggle('flagged', c.establishment==='low');
