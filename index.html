@@ -469,7 +469,7 @@
       </div>
 
       <div class="field" id="fieldAmount">
-        <label>Amount <span class="conf" id="confAmount"></span></label>
+        <label>Amount (total) <span class="conf" id="confAmount"></span></label>
         <div class="amount-row">
           <select class="curr-select" id="inputCurrency">
             <option value="AUD" selected>AUD</option>
@@ -480,6 +480,15 @@
           </select>
           <input class="amt-input" type="number" step="0.01" id="inputAmount" placeholder="0.00">
         </div>
+      </div>
+
+      <div class="field" id="fieldGst">
+        <label>
+          <span>GST included <span style="font-weight:400; text-transform:none; letter-spacing:0;">(auto, 10% of total)</span></span>
+          <span class="conf" id="gstAutoTag" style="color:var(--ink-soft);"></span>
+        </label>
+        <input type="number" step="0.01" id="inputGst" placeholder="0.00">
+        <div style="font-size:10.5px; color:var(--ink-soft); margin-top:6px; font-family:var(--mono);">Reference only — editing this does not change the Amount above.</div>
       </div>
 
       <div class="field">
@@ -1166,20 +1175,62 @@ function parseReceiptText(text){
     confidences.date = 'low';
   }
 
-  // --- Establishment: score candidate lines instead of just taking the first plausible one ---
+  // --- Establishment: try explicit field labels FIRST (most reliable), then fall back to scoring ---
   let establishment = '';
-  const junkPattern = /^(tax invoice|invoice|receipt|abn|acn|gst|thank you|thanks for|www\.|http|tel:|phone|ph:|customer (copy|details)|loyalty|card|eftpos|change|balance|cashier|operator|store\s?#|reg(ister)?\s?\d|welcome to|have a|see you|survey|feedback|your (receipt|opinion)|receipt of purchase|recept of purchase)/i;
-  // common single-word receipt boilerplate that is often printed in caps near the top
-  // but is NEVER the business name — must be excluded outright, not just down-weighted
-  const boilerplateWords = new Set(['TOTAL','SUBTOTAL','AMOUNT','TAX','GST','VAT','QTY','PRICE','PRODUCT','ITEM','ITEMS','CASH','CARD','CHANGE','BALANCE','TENDER','PAYMENT','STAFF','DEVICE','CASHIER','OPERATOR','REGISTER','TILL','RECEIPT','INVOICE','DATE','TIME','THANK','THANKS','THANKYOU','WELCOME'].map(w=>w.toUpperCase()));
-  // EFTPOS terminal / payment-processor headers — these appear on card payment slips
-  // (as opposed to itemised store receipts) and are NEVER the merchant, just the bank/network
-  // that processed the payment. The real merchant is almost always the line right below this.
-  const paymentProcessorPattern = /\b(nab|anz|cba|commonwealth bank|westpac|bendigo|suncorp|bankwest|tyro|square|zeller|smartpay|verifone|ingenico|worldline|pin ?pad)\b.*\b(eftpos|terminal|pos)\b|\beftpos\b.*\b(nab|anz|cba|westpac|bendigo|suncorp|bankwest|tyro|square|zeller)\b/i;
+
+  // Strategy 1: many receipts (especially digital order confirmations / delivery apps)
+  // explicitly label the business, e.g. "Venue: Samsam Chicken", "Merchant - X", or
+  // "Venue    Samsam Chicken" (colon-free, column-style layout — common when OCR.space
+  // renders a two-column receipt template as label + big whitespace gap + value)
+  const labelPatterns = [
+    /\bvenue\s*[:\-]?\s+(.+)/i,
+    /\bmerchant\s*(?:name)?\s*[:\-]?\s+(.+)/i,
+    /\bbusiness\s*name\s*[:\-]?\s+(.+)/i,
+    /\bstore\s*name\s*[:\-]?\s+(.+)/i,
+    /\bsold\s*by\s*[:\-]?\s+(.+)/i,
+    /\bsupplier\s*[:\-]?\s+(.+)/i,
+    /\brestaurant\s*[:\-]?\s+(.+)/i,
+  ];
+  for(const l of lines){
+    for(const pattern of labelPatterns){
+      const m = l.match(pattern);
+      if(m && m[1]){
+        let val = m[1].trim().replace(/[^a-zA-Z0-9 &'.,\-]/g, '').trim();
+        // strip trailing junk that sometimes rides along on the same OCR line (e.g. an address)
+        val = val.split(/\s{2,}/)[0].trim();
+        if(val.length>=3 && val.length<=45){
+          establishment = val;
+          confidences.establishment = 'high';
+          break;
+        }
+      }
+    }
+    if(establishment) break;
+  }
+
+  // Strategy 2: score candidate lines (fallback when no explicit label was found)
+  if(!establishment){
+  const junkPattern = /^(tax invoice|invoice|receipt|abn|acn|gst|thank you|thanks for|www\.|http|tel:|phone|ph:|customer (copy|details)|loyalty|card|eftpos|change|balance|cashier|operator|store\s?#|reg(ister)?\s?\d|welcome to|have a|see you|survey|feedback|your (receipt|opinion|order)|receipt of purchase|recept of purchase|venue|order date|order number|table number|email|phone:)/i;
+  // common single/multi-word receipt boilerplate — column headers, transaction metadata —
+  // that is often printed prominently near the top but is NEVER the business name.
+  // Must be excluded outright, not just down-weighted, since these can otherwise out-score
+  // the real name (e.g. "PRICE QTY" is short, title-case, and appears early).
+  const boilerplatePhrases = new Set([
+    'TOTAL','SUBTOTAL','AMOUNT','TAX','GST','VAT','QTY','PRICE','PRODUCT','ITEM','ITEMS',
+    'CASH','CARD','CHANGE','BALANCE','TENDER','PAYMENT','STAFF','DEVICE','CASHIER','OPERATOR',
+    'REGISTER','TILL','RECEIPT','INVOICE','DATE','TIME','THANK','THANKS','THANKYOU','WELCOME',
+    'PRICE QTY','QTY PRICE','PRICE QTY TOTAL','QTY TOTAL','ITEM QTY','DESCRIPTION QTY',
+    'YOUR RECEIPT','YOUR ORDER','TAX INVOICE','ORDER DATE','TABLE NUMBER','ORDER NUMBER'
+  ].map(w=>w.toUpperCase()));
   const addressPattern = /\b(street|st\.|road|rd\.|avenue|ave\.|drive|dr\.|highway|hwy|suite|unit|level|shop\s?\d|nsw|vic|qld|wa|sa|tas|act|nt)\b/i;
   const looksLikeDate = /\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/;
   const looksLikeTime = /\d{1,2}:\d{2}/;
   const looksLikePhone = /\(?\d{2,4}\)?[\s-]?\d{3,4}[\s-]?\d{3,4}/;
+  const looksLikeEmail = /@/;
+  // EFTPOS terminal / payment-processor headers — these appear on card payment slips
+  // (as opposed to itemised store receipts) and are NEVER the merchant, just the bank/network
+  // that processed the payment. The real merchant is almost always the line right below this.
+  const paymentProcessorPattern = /\b(nab|anz|cba|commonwealth bank|westpac|bendigo|suncorp|bankwest|tyro|square|zeller|smartpay|verifone|ingenico|worldline|pin ?pad)\b.*\b(eftpos|terminal|pos)\b|\beftpos\b.*\b(nab|anz|cba|westpac|bendigo|suncorp|bankwest|tyro|square|zeller)\b/i;
 
   const candidates = [];
   // widen window since splitting on whitespace-gaps produces more, shorter fragments per original line
@@ -1190,14 +1241,16 @@ function parseReceiptText(text){
     if(paymentProcessorPattern.test(clean)) return; // e.g. "NAB EFTPOS" — bank/terminal name, not the merchant
     if(addressPattern.test(clean)) return;
     if(looksLikeDate.test(clean) || looksLikeTime.test(clean) || looksLikePhone.test(clean)) return;
+    if(looksLikeEmail.test(l)) return; // check original (unstripped) line for @ since clean strips it
     if(/^\d+$/.test(clean)) return;
     if(/^[\d\s.,$-]+$/.test(clean)) return; // pure numbers/money, not a name
     const letterCount = (clean.match(/[a-zA-Z]/g)||[]).length;
     if(letterCount < clean.length * 0.5) return; // too many symbols/digits to be a name
+    if(boilerplatePhrases.has(clean.toUpperCase())) return; // exact-match boilerplate phrase, any word count
 
     const wordCount = clean.split(/\s+/).filter(Boolean).length;
     // a lone single word that's pure receipt boilerplate is never the establishment name
-    if(wordCount===1 && boilerplateWords.has(clean.toUpperCase())) return;
+    if(wordCount===1 && boilerplatePhrases.has(clean.toUpperCase())) return;
 
     let score = 0;
     score += Math.max(0, 6 - idx);              // earlier lines score higher
@@ -1235,6 +1288,7 @@ function parseReceiptText(text){
     establishment = '';
     confidences.establishment = 'low';
   }
+  } // end fallback scoring block
 
   // --- Category guess based on keywords, scored across whole receipt text (not first match wins) ---
   let category = 'Misc';
@@ -1346,7 +1400,33 @@ function openReviewForExisting(id){
   openSheet();
 }
 
+// Australia's GST is 10%, applied so that a GST-inclusive total = pre-GST price × 1.1.
+// To back out the GST component from a total that already includes it: total ÷ 11.
+function recalculateGstFromAmount(){
+  const amt = parseFloat(document.getElementById('inputAmount').value);
+  const gstInput = document.getElementById('inputGst');
+  const tag = document.getElementById('gstAutoTag');
+  if(!isNaN(amt) && amt>0){
+    gstInput.value = (amt/11).toFixed(2);
+    tag.innerText = '(auto)';
+  } else {
+    gstInput.value = '';
+    tag.innerText = '';
+  }
+}
+// only auto-recalculate GST while the user hasn't manually typed their own GST value
+// for THIS sheet session — once they touch the GST field directly, stop overwriting it
+let gstManuallyEdited = false;
+document.getElementById('inputAmount').addEventListener('input', ()=>{
+  if(!gstManuallyEdited) recalculateGstFromAmount();
+});
+document.getElementById('inputGst').addEventListener('input', ()=>{
+  gstManuallyEdited = true;
+  document.getElementById('gstAutoTag').innerText = '';
+});
+
 function populateSheet(){
+  gstManuallyEdited = false;
   const d = currentReviewDraft;
   document.getElementById('verifyFlag').className = 'verify-flag ' + (d.needsCheck ? 'needs':'ok');
   document.getElementById('verifyFlag').innerText = d.needsCheck ? '⚠ Needs check' : '✓ Looks good';
@@ -1387,6 +1467,15 @@ function populateSheet(){
   document.getElementById('inputCurrency').value = d.currency || 'AUD';
   document.getElementById('inputNotes').value = d.notes || '';
   renderCatGrid(d.category);
+
+  // GST: use a stored value if this receipt already had one set (e.g. re-opening an
+  // existing entry), otherwise auto-calculate 10% GST-inclusive from the total
+  if(d.gst !== undefined && d.gst !== null && d.gst !== ''){
+    document.getElementById('inputGst').value = d.gst;
+    document.getElementById('gstAutoTag').innerText = '';
+  } else {
+    recalculateGstFromAmount();
+  }
 
   const c = d.confidences || {};
   confBadge('confDate', c.date);
@@ -1433,6 +1522,7 @@ document.getElementById('btnConfirm').onclick = ()=>{
   currentReviewDraft.date = document.getElementById('inputDate').value;
   currentReviewDraft.establishment = document.getElementById('inputEstablishment').value.trim();
   currentReviewDraft.amount = document.getElementById('inputAmount').value;
+  currentReviewDraft.gst = document.getElementById('inputGst').value;
   currentReviewDraft.currency = document.getElementById('inputCurrency').value;
   currentReviewDraft.notes = document.getElementById('inputNotes').value.trim();
 
