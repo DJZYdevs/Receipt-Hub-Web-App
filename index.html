@@ -493,7 +493,7 @@
 
       <div class="field">
         <label>Category</label>
-        <div class="cat-grid" id="catGrid"></div>
+        <select id="catSelect" style="width:100%; padding:12px 13px; border-radius:11px; border:1.5px solid var(--rule); font-size:15px; background:var(--card); color:var(--ink); font-family:inherit; appearance:none; -webkit-appearance:none;"></select>
       </div>
 
       <div class="field">
@@ -550,6 +550,10 @@
       <h4>Known merchants</h4>
       <p>Every time you verify a receipt, the app remembers the establishment name and category. Next time that merchant's name appears anywhere in the scanned text — even on a messy or oddly-formatted receipt — it's matched instantly instead of guessed.</p>
       <div id="merchantList" style="margin-top:10px;"></div>
+
+      <h4>Reset test data</h4>
+      <p>This prototype starts with a few demo receipts and any test entries you've verified live only in this browser tab (nothing is on a server yet). Once you're ready to start tracking for real, clear everything out and begin fresh.</p>
+      <button id="btnClearAllData" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid #D9A896; background:#FBEEE9; color:#8A3A2C; font-size:13.5px; font-weight:700; cursor:pointer; margin-top:6px;">Clear all receipts &amp; start fresh</button>
     </div>
   </div>
 
@@ -1210,7 +1214,7 @@ function parseReceiptText(text){
 
   // Strategy 2: score candidate lines (fallback when no explicit label was found)
   if(!establishment){
-  const junkPattern = /^(tax invoice|invoice|receipt|abn|acn|gst|thank you|thanks for|www\.|http|tel:|phone|ph:|customer (copy|details)|loyalty|card|eftpos|change|balance|cashier|operator|store\s?#|reg(ister)?\s?\d|welcome to|have a|see you|survey|feedback|your (receipt|opinion|order)|receipt of purchase|recept of purchase|venue|order date|order number|table number|email|phone:)/i;
+  const junkPattern = /^(tax invoice|invoice|receipt|abn|acn|gst|thank you|thanks for|www\.|http|tel:|phone|ph:|customer (copy|details|information|name)|loyalty|card|eftpos|change|balance|cashier|operator|store\s?#|reg(ister)?\s?\d|welcome to|have a|see you|survey|feedback|your (receipt|opinion|order)|receipt of purchase|recept of purchase|venue|order (date|number|status)|table\s?(number)?|email|phone:|view order|start new|continue$)/i;
   // common single/multi-word receipt boilerplate — column headers, transaction metadata —
   // that is often printed prominently near the top but is NEVER the business name.
   // Must be excluded outright, not just down-weighted, since these can otherwise out-score
@@ -1220,7 +1224,11 @@ function parseReceiptText(text){
     'CASH','CARD','CHANGE','BALANCE','TENDER','PAYMENT','STAFF','DEVICE','CASHIER','OPERATOR',
     'REGISTER','TILL','RECEIPT','INVOICE','DATE','TIME','THANK','THANKS','THANKYOU','WELCOME',
     'PRICE QTY','QTY PRICE','PRICE QTY TOTAL','QTY TOTAL','ITEM QTY','DESCRIPTION QTY',
-    'YOUR RECEIPT','YOUR ORDER','TAX INVOICE','ORDER DATE','TABLE NUMBER','ORDER NUMBER'
+    'YOUR RECEIPT','YOUR ORDER','TAX INVOICE','ORDER DATE','TABLE NUMBER','ORDER NUMBER',
+    // app-screenshot UI chrome — page titles, section headers, buttons on delivery/ordering apps
+    'ORDER STATUS','CUSTOMER INFORMATION','CUSTOMER NAME','CUSTOMER','PHONE NUMBER','TABLE',
+    'VIEW ORDER DETAILS','ORDER DETAILS','CONTINUE','START NEW ORDER','PLACE ORDER',
+    'CHECKOUT','CART','MENU','HOME','BACK','NEXT','CONFIRM','DONE'
   ].map(w=>w.toUpperCase()));
   const addressPattern = /\b(street|st\.|road|rd\.|avenue|ave\.|drive|dr\.|highway|hwy|suite|unit|level|shop\s?\d|nsw|vic|qld|wa|sa|tas|act|nt)\b/i;
   const looksLikeDate = /\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}/;
@@ -1232,9 +1240,17 @@ function parseReceiptText(text){
   // that processed the payment. The real merchant is almost always the line right below this.
   const paymentProcessorPattern = /\b(nab|anz|cba|commonwealth bank|westpac|bendigo|suncorp|bankwest|tyro|square|zeller|smartpay|verifone|ingenico|worldline|pin ?pad)\b.*\b(eftpos|terminal|pos)\b|\beftpos\b.*\b(nab|anz|cba|westpac|bendigo|suncorp|bankwest|tyro|square|zeller)\b/i;
 
+  const personNameLabelPattern = /\b(customer\s*name|card\s*holder|cardholder|attn|attention|contact\s*name|guest\s*name|billed\s*to|ordered\s*by)\b/i;
+
   const candidates = [];
   // widen window since splitting on whitespace-gaps produces more, shorter fragments per original line
   lines.slice(0, 20).forEach((l, idx)=>{
+    // skip this whole line if IT is a person-name label ("Customer Name: John Smith")
+    if(personNameLabelPattern.test(l)) return;
+    // also skip if the line immediately before it (in the flattened candidate list) was a
+    // bare person-name label with no value attached — whitespace-splitting often separates
+    // "Customer Name" and "DJ Chan" into two adjacent array entries
+    if(idx>0 && personNameLabelPattern.test(lines[idx-1]) && lines[idx-1].trim().split(/\s+/).length<=3) return;
     const clean = l.replace(/[^a-zA-Z0-9 &'.,\-]/g, '').trim();
     if(clean.length<3 || clean.length>40) return;
     if(junkPattern.test(clean)) return;
@@ -1293,7 +1309,7 @@ function parseReceiptText(text){
   // --- Category guess based on keywords, scored across whole receipt text (not first match wins) ---
   let category = 'Misc';
   const catMap = {
-    Meals:['cafe','restaurant','kitchen','coffee','bar ','eatery','food','grill','bakery','pizzeria','sushi','diner','bistro','pub','takeaway'],
+    Meals:['cafe','restaurant','kitchen','coffee','bar ','eatery','food','grill','bakery','pizzeria','sushi','diner','bistro','pub','takeaway','chicken','burger','noodle','kebab','thai','chinese restaurant','indian restaurant','laksa','pho ','dumpling'],
     Fuel:['fuel','bp ',' bp','shell','caltex','ampol','petrol','7-eleven','united petroleum'],
     Materials:['bunnings','hardware','timber','steel','trade','mitre 10','tools warehouse'],
     Software:['software','subscription','saas','adobe','microsoft','google','apple.com/bill','app store','openai','anthropic'],
@@ -1311,6 +1327,15 @@ function parseReceiptText(text){
     let hits = 0;
     keywords.forEach(k=>{ if(lowerText.includes(k)) hits++; });
     if(hits > bestCat.hits) bestCat = {name:cat, hits};
+  }
+  // fallback: no brand/keyword match at all — look for generic structural signals that
+  // strongly imply a dine-in/takeaway food order even when the venue name itself is unknown
+  // (e.g. "Khaosan Lane", a restaurant this app has never seen keywords for)
+  if(bestCat.hits===0){
+    const mealSignals = ['table number','table\t','order number','order status','your order','dine in','dine-in','entree','main course','side dish','waiter','server','tip','gratuity'];
+    let mealHits = 0;
+    mealSignals.forEach(sig=>{ if(lowerText.includes(sig)) mealHits++; });
+    if(mealHits>0) bestCat = {name:'Meals', hits:mealHits};
   }
   category = bestCat.hits > 0 ? bestCat.name : 'Misc';
   // add Groceries to the pill palette set used elsewhere if not already categorised
@@ -1346,18 +1371,19 @@ function renderFolderSelectRow(selectedId){
 }
 
 function renderCatGrid(selectedCat){
-  const grid = document.getElementById('catGrid');
-  grid.innerHTML='';
-  CATEGORIES.forEach(cat=>{
-    const btn = document.createElement('div');
-    btn.className = 'cat-opt' + (cat===selectedCat ? ' selected':'');
-    btn.innerText = cat;
-    btn.onclick = ()=>{
-      currentReviewDraft.category = cat;
-      renderCatGrid(cat);
-    };
-    grid.appendChild(btn);
+  const select = document.getElementById('catSelect');
+  select.innerHTML = '';
+  // if this receipt's category isn't in the master list yet (e.g. a newly-learned
+  // merchant category), add it so it's still selectable/visible
+  const options = CATEGORIES.includes(selectedCat) ? CATEGORIES : [...CATEGORIES, selectedCat];
+  options.forEach(cat=>{
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.innerText = cat;
+    if(cat===selectedCat) opt.selected = true;
+    select.appendChild(opt);
   });
+  select.onchange = ()=>{ currentReviewDraft.category = select.value; };
 }
 
 function confBadge(elId, level){
@@ -1615,6 +1641,18 @@ document.getElementById('storageCloseBtn').onclick = ()=>{
 storageBackdrop.onclick = ()=>{
   storageBackdrop.classList.remove('open');
   storageSheet.classList.remove('open');
+};
+
+document.getElementById('btnClearAllData').onclick = ()=>{
+  const count = receipts.length;
+  if(!confirm(`This will permanently delete all ${count} receipt${count===1?'':'s'} in this browser tab. This cannot be undone. Continue?`)) return;
+  if(!confirm('Are you sure? This is your last chance to cancel.')) return;
+  receipts = [];
+  receiptSeq = 1;
+  storageBackdrop.classList.remove('open');
+  storageSheet.classList.remove('open');
+  renderAll();
+  showToast('All receipts cleared — starting fresh');
 };
 
 /* ============================================================
