@@ -522,20 +522,14 @@
       <button class="sheet-close" id="storageCloseBtn">✕</button>
     </div>
     <div class="form-body">
-      <p>In this prototype, receipts are stored locally in your browser (IndexedDB-style memory) so you can test the flow. In a production build, each verified receipt would sync automatically to a real backend so nothing lives only on one device.</p>
-      <h4>Recommended production setup</h4>
-      <div class="storage-opt selected">
-        <span class="ic">☁️</span>
-        <div><strong>Cloud object storage + database</strong><span>Original photos go to a bucket (e.g. Google Cloud Storage / S3 / Cloudflare R2), organised by folder/year/month. Extracted fields go into a proper database (e.g. Postgres via Supabase or Firebase) so they're searchable and reportable.</span></div>
-      </div>
-      <div class="storage-opt">
-        <span class="ic">🔗</span>
-        <div><strong>Connect your own Google Drive</strong><span>Simplest for a solo user — receipts save into folders like Drive/Receipts/Work/2026-07, with the sheet data mirrored to a Google Sheet for easy export to your accountant.</span></div>
-      </div>
-      <div class="storage-opt">
-        <span class="ic">🔒</span>
-        <div><strong>Encrypted local-first, optional sync</strong><span>Works offline on your phone; syncs to cloud only when connected. Best if you want data to stay private by default.</span></div>
-      </div>
+      <p>Receipts are saved to this browser's local storage (IndexedDB), so closing the app or restarting your phone won't lose anything — it'll be exactly as you left it next time you open this file. This is device-local, not a cloud account, so it won't sync across phones/browsers on its own.</p>
+
+      <h4>Google Drive archive</h4>
+      <p>A Drive folder is ready to receive your receipts: <strong>Engineer of Things — Receipts</strong>, with Personal / Work / Investments / Other subfolders matching the app.</p>
+      <a href="https://drive.google.com/drive/folders/1F68n8iMC3T1AVHTEU0rUDs8Q_7fpfJsN" target="_blank" style="display:block; text-align:center; padding:12px; border-radius:12px; background:var(--sage-deep); color:#fff; text-decoration:none; font-size:13.5px; font-weight:700; margin:10px 0;">Open Drive folder ↗</a>
+      <p style="margin-top:-4px;">This static file can't upload to Drive directly from your phone (no backend to hold the sign-in), so for now: tap <strong>Export receipts</strong> below, then share the downloaded file to the Drive app's folder above. A direct in-app upload would need a small backend — let me know if you want that built next.</p>
+      <button id="btnExportReceipts" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid var(--sage); background:var(--sage-pale); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer; margin-top:4px;">Export receipts (JSON)</button>
+
       <h4>What gets archived per receipt</h4>
       <p>Original image(s), extracted fields, your verified/edited values, timestamp of verification, and folder/category — so every entry is fully auditable later.</p>
 
@@ -551,8 +545,8 @@
       <p>Every time you verify a receipt, the app remembers the establishment name and category. Next time that merchant's name appears anywhere in the scanned text — even on a messy or oddly-formatted receipt — it's matched instantly instead of guessed.</p>
       <div id="merchantList" style="margin-top:10px;"></div>
 
-      <h4>Reset test data</h4>
-      <p>This prototype starts with a few demo receipts and any test entries you've verified live only in this browser tab (nothing is on a server yet). Once you're ready to start tracking for real, clear everything out and begin fresh.</p>
+      <h4>Reset data</h4>
+      <p>This clears every receipt saved on this device. Export first if you want a backup — this cannot be undone.</p>
       <button id="btnClearAllData" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid #D9A896; background:#FBEEE9; color:#8A3A2C; font-size:13.5px; font-weight:700; cursor:pointer; margin-top:6px;">Clear all receipts &amp; start fresh</button>
     </div>
   </div>
@@ -604,24 +598,88 @@ let currentReviewDraft = null; // the receipt object being edited in the sheet
 let editingExistingId = null; // if reviewing an already-saved receipt
 
 /* ============================================================
-   INIT / SEED DATA
+   PERSISTENCE (IndexedDB — handles receipt photos without the
+   ~5-10MB ceiling that localStorage would hit after a few dozen
+   photographed receipts)
    ============================================================ */
-function seedDemoData(){
-  receipts.push({
-    id: receiptSeq++, folderId:'work', date:'2026-07-02', establishment:'Officeworks',
-    amount:'64.50', currency:'AUD', category:'Office', notes:'Printer paper + folders for site audit',
-    images:[], verified:true, needsCheck:false
-  });
-  receipts.push({
-    id: receiptSeq++, folderId:'work', date:'2026-06-29', establishment:'BP Fuel',
-    amount:'112.30', currency:'AUD', category:'Fuel', notes:'', images:[], verified:true, needsCheck:false
-  });
-  receipts.push({
-    id: receiptSeq++, folderId:'personal', date:'2026-07-04', establishment:'Woolworths',
-    amount:'87.15', currency:'AUD', category:'Meals', notes:'', images:[], verified:true, needsCheck:false
+const DB_NAME = 'ledger_receipts_db';
+const DB_VERSION = 1;
+const STORE_NAME = 'app_state';
+let dbInstance = null;
+
+function openDB(){
+  return new Promise((resolve, reject)=>{
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e)=>{
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(STORE_NAME)){
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
   });
 }
-seedDemoData();
+
+async function getDB(){
+  if(!dbInstance) dbInstance = await openDB();
+  return dbInstance;
+}
+
+async function idbSet(key, value){
+  const db = await getDB();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put(value, key);
+    tx.oncomplete = ()=> resolve();
+    tx.onerror = ()=> reject(tx.error);
+  });
+}
+
+async function idbGet(key){
+  const db = await getDB();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(key);
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+
+// debounced save so rapid successive changes (e.g. typing in a field) don't
+// trigger a disk write on every keystroke
+let saveTimer = null;
+function persistState(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    try{
+      await idbSet('receipts', receipts);
+      await idbSet('customFolders', customFolders);
+      await idbSet('receiptSeq', receiptSeq);
+      await idbSet('activeFolderId', activeFolderId);
+    }catch(err){
+      console.error('Failed to save to IndexedDB', err);
+      showToast('⚠ Could not save — storage may be full');
+    }
+  }, 250);
+}
+
+async function loadPersistedState(){
+  try{
+    const [savedReceipts, savedFolders, savedSeq, savedActiveFolder] = await Promise.all([
+      idbGet('receipts'), idbGet('customFolders'), idbGet('receiptSeq'), idbGet('activeFolderId')
+    ]);
+    if(savedReceipts) receipts = savedReceipts;
+    if(savedFolders) customFolders = savedFolders;
+    if(savedSeq) receiptSeq = savedSeq;
+    if(savedActiveFolder) activeFolderId = savedActiveFolder;
+    return true;
+  }catch(err){
+    console.error('Failed to load from IndexedDB', err);
+    return false;
+  }
+}
+
 
 /* ============================================================
    RENDER: FOLDER TABS
@@ -724,8 +782,14 @@ function formatDate(d){
 }
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-function renderAll(){ renderFolderTabs(); renderReceiptList(); }
-renderAll();
+function renderAll(){ renderFolderTabs(); renderReceiptList(); persistState(); }
+
+// on startup: load whatever was saved from a previous session before the first render,
+// so re-opening the app shows exactly where you left off rather than an empty list
+(async function initApp(){
+  await loadPersistedState();
+  renderAll();
+})();
 
 /* ============================================================
    CAMERA
@@ -1641,6 +1705,43 @@ document.getElementById('storageCloseBtn').onclick = ()=>{
 storageBackdrop.onclick = ()=>{
   storageBackdrop.classList.remove('open');
   storageSheet.classList.remove('open');
+};
+
+document.getElementById('btnExportReceipts').onclick = ()=>{
+  if(receipts.length===0){
+    showToast('No receipts to export yet');
+    return;
+  }
+  // export a clean, human-readable structure — images included as base64 so the
+  // export is fully self-contained (openable/re-importable without the app)
+  const exportData = {
+    exportedAt: new Date().toISOString(),
+    folders: allFolders().map(f=>({id:f.id, label:f.label})),
+    receipts: receipts.map(r=>({
+      folder: (allFolders().find(f=>f.id===r.folderId)||{}).label || r.folderId,
+      date: r.date,
+      establishment: r.establishment,
+      amount: r.amount,
+      currency: r.currency,
+      gst: r.gst || null,
+      category: r.category,
+      notes: r.notes,
+      verified: r.verified,
+      imageCount: (r.images||[]).length,
+      images: r.images || []
+    }))
+  };
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `receipts-export-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`Exported ${receipts.length} receipt${receipts.length===1?'':'s'} — share the download to Drive`);
 };
 
 document.getElementById('btnClearAllData').onclick = ()=>{
