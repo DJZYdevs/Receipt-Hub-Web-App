@@ -60,6 +60,35 @@
   .running-total .sub{ font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.08em; margin-bottom:4px;}
   .running-total .curr{ font-size:16px; color:var(--ink-soft); font-weight:600; margin-right:2px;}
 
+  /* ---------- Month navigator ---------- */
+  .month-nav{
+    display:flex; align-items:center; gap:8px; margin-top:14px;
+  }
+  .month-nav-btn{
+    flex:0 0 auto; width:30px; height:30px; border-radius:8px; border:1px solid var(--rule);
+    background:var(--card); color:var(--ink-soft); font-size:13px; cursor:pointer;
+  }
+  .month-nav-label{
+    flex:1; padding:7px 10px; border-radius:8px; border:none; background:transparent;
+    color:var(--ink); font-size:14px; font-weight:700; text-align:center; cursor:pointer;
+  }
+  .month-nav-today{
+    flex:0 0 auto; padding:6px 10px; border-radius:8px; border:1px solid var(--rule);
+    background:var(--paper-dim); color:var(--ink-soft); font-size:11.5px; font-weight:700; cursor:pointer;
+  }
+
+  /* ---------- Spend comparison bars ---------- */
+  .spend-bars{ margin-top:14px; display:flex; flex-direction:column; gap:8px;}
+  .spend-bar-row{ display:flex; flex-direction:column; gap:4px;}
+  .spend-bar-label{
+    display:flex; justify-content:space-between; font-size:11.5px; color:var(--ink-soft); font-weight:600;
+  }
+  .spend-bar-amount{ font-family:var(--mono); color:var(--ink); font-weight:700;}
+  .spend-bar-track{ height:8px; border-radius:6px; background:var(--paper-dim); overflow:hidden;}
+  .spend-bar-fill{ height:100%; border-radius:6px; transition:width .3s; width:0%;}
+  .spend-bar-fill.current{ background:var(--sage-deep);}
+  .spend-bar-fill.previous{ background:var(--sage);}
+
   /* ---------- Folder tabs ---------- */
   .folders{
     display:flex; gap:8px; padding:14px 20px 4px; overflow-x:auto;
@@ -348,7 +377,7 @@
   <div class="topbar">
     <div class="brand">
       <div>
-        <div class="brand-mark">Engineer of Things · Ledger</div>
+        <div class="brand-mark">Engineer of Things · Ledger <span id="versionBadge" style="opacity:0.6; font-weight:400;">v1.0</span></div>
         <h1>Receipts</h1>
       </div>
       <div class="folder-chip" id="activeFolderChip">📁 Personal</div>
@@ -360,14 +389,41 @@
       </div>
       <div class="sub" id="pendingSummary" style="margin-bottom:6px;">0 pending review</div>
     </div>
+
+    <div class="month-nav" id="monthNav">
+      <button class="month-nav-btn" id="monthPrevBtn">◀</button>
+      <button class="month-nav-label" id="monthNavLabel">July 2026</button>
+      <button class="month-nav-btn" id="monthNextBtn">▶</button>
+      <button class="month-nav-today" id="monthTodayBtn">Today</button>
+    </div>
+
+    <div class="spend-bars" id="spendBars">
+      <div class="spend-bar-row">
+        <div class="spend-bar-label">
+          <span id="currentMonthLabel">This month</span>
+          <span class="spend-bar-amount" id="currentMonthAmount">$0.00</span>
+        </div>
+        <div class="spend-bar-track"><div class="spend-bar-fill current" id="currentMonthFill"></div></div>
+      </div>
+      <div class="spend-bar-row">
+        <div class="spend-bar-label">
+          <span id="prevMonthLabel">Last month</span>
+          <span class="spend-bar-amount" id="prevMonthAmount">$0.00</span>
+        </div>
+        <div class="spend-bar-track"><div class="spend-bar-fill previous" id="prevMonthFill"></div></div>
+      </div>
+    </div>
   </div>
 
   <!-- FOLDER TABS -->
   <div class="folders" id="folderTabs"></div>
 
   <div class="section-label">
-    <span>This folder</span>
-    <span class="count" id="receiptCount">0</span>
+    <span id="sectionLabelText">This folder</span>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <button id="btnOpenSearch" style="background:none; border:none; font-size:15px; cursor:pointer; color:var(--ink-soft); padding:2px 4px; position:relative;">🔍<span id="filterActiveDot" style="display:none; position:absolute; top:0; right:0; width:7px; height:7px; border-radius:50%; background:var(--amber);"></span></button>
+      <span class="count" id="receiptCount">0</span>
+    </div>
   </div>
 
   <div class="receipt-list" id="receiptList"></div>
@@ -386,7 +442,7 @@
       <span class="ic">📷</span> Capture Receipt
     </button>
     <button class="cap-btn secondary" id="btnStorageInfo">
-      <span class="ic">☁️</span> Storage
+      <span class="ic">☰</span> Menu
     </button>
   </div>
 
@@ -493,7 +549,10 @@
 
       <div class="field">
         <label>Category</label>
-        <select id="catSelect" style="width:100%; padding:12px 13px; border-radius:11px; border:1.5px solid var(--rule); font-size:15px; background:var(--card); color:var(--ink); font-family:inherit; appearance:none; -webkit-appearance:none;"></select>
+        <div style="display:flex; gap:8px;">
+          <select id="catSelect" style="flex:1; padding:12px 13px; border-radius:11px; border:1.5px solid var(--rule); font-size:15px; background:var(--card); color:var(--ink); font-family:inherit; appearance:none; -webkit-appearance:none;"></select>
+          <button id="btnCatGridOpen" type="button" style="flex:0 0 auto; padding:0 16px; border-radius:11px; border:1.5px solid var(--rule); background:var(--card); font-size:18px; cursor:pointer;">▦</button>
+        </div>
       </div>
 
       <div class="field">
@@ -518,7 +577,7 @@
   <div class="sheet info-sheet" id="storageSheet">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <h2>Archive &amp; storage</h2>
+      <h2>Menu</h2>
       <button class="sheet-close" id="storageCloseBtn">✕</button>
     </div>
     <div class="form-body">
@@ -547,6 +606,11 @@
       <p>Every time you verify a receipt, the app remembers the establishment name and category. Next time that merchant's name appears anywhere in the scanned text — even on a messy or oddly-formatted receipt — it's matched instantly instead of guessed.</p>
       <div id="merchantList" style="margin-top:10px;"></div>
 
+      <h4>Categories</h4>
+      <p>Manage your category list here anytime — this is separate from the quick "+ Add new category" shortcut available while verifying a receipt, which is handy for adding one on the fly mid-scan.</p>
+      <div id="categoryManageList" style="margin-top:10px;"></div>
+      <button id="btnMenuAddCategory" style="width:100%; padding:12px; border-radius:11px; border:1.5px dashed var(--sage); background:var(--card); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer; margin-top:6px;">+ Add new category</button>
+
       <h4>Reset data</h4>
       <p>This clears every receipt saved on this device. Export first if you want a backup — this cannot be undone.</p>
       <button id="btnClearAllData" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid #D9A896; background:#FBEEE9; color:#8A3A2C; font-size:13.5px; font-weight:700; cursor:pointer; margin-top:6px;">Clear all receipts &amp; start fresh</button>
@@ -554,6 +618,55 @@
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- SEARCH / FILTER PANEL -->
+  <div class="sheet-backdrop" id="searchBackdrop"></div>
+  <div class="sheet" id="searchSheet" style="max-height:85vh;">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2>Search &amp; filter</h2>
+      <button class="sheet-close" id="searchCloseBtn">✕</button>
+    </div>
+    <div class="form-body">
+      <div class="field">
+        <label>Search</label>
+        <input type="text" id="searchQueryInput" placeholder="Establishment, notes, category…">
+      </div>
+      <div class="field">
+        <label>Category</label>
+        <select id="searchCategorySelect" style="width:100%; padding:12px 13px; border-radius:11px; border:1.5px solid var(--rule); font-size:15px; background:var(--card); color:var(--ink); font-family:inherit;">
+          <option value="">All categories</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Date range</label>
+        <div style="display:flex; gap:8px;">
+          <input type="date" id="searchDateFrom" style="flex:1;">
+          <input type="date" id="searchDateTo" style="flex:1;">
+        </div>
+      </div>
+      <p style="font-size:11.5px; color:var(--ink-soft); margin-top:-4px;">Searching across all months, not just the one you're currently viewing on the dashboard.</p>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn delete" id="btnClearFilters">Clear filters</button>
+      <button class="btn confirm" id="btnApplyFilters">Apply</button>
+    </div>
+  </div>
+
+  <!-- CATEGORY POP-OUT GRID -->
+  <div class="sheet-backdrop" id="catGridBackdrop"></div>
+  <div class="sheet" id="catGridSheet" style="max-height:80vh;">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2>Choose category</h2>
+      <button class="sheet-close" id="catGridCloseBtn">✕</button>
+    </div>
+    <div class="form-body">
+      <p style="font-size:11.5px; color:var(--ink-soft); margin:0 0 12px; font-family:var(--mono); text-transform:uppercase; letter-spacing:.05em;">Sorted by how often you use each one</p>
+      <div class="cat-grid" id="catPopoutGrid" style="display:grid; grid-template-columns:repeat(3,1fr); gap:8px;"></div>
+      <button id="btnCatGridAddNew" style="width:100%; margin-top:14px; padding:12px; border-radius:11px; border:1.5px dashed var(--sage); background:var(--card); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer;">+ Add new category</button>
+    </div>
+  </div>
 
   <!-- IMAGE LIGHTBOX -->
   <div class="lightbox" id="lightbox">
@@ -581,12 +694,20 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
+const APP_VERSION = '1.4.0'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
 const CATEGORIES = ['Meals','Groceries','Fuel','Materials','Software','Travel','Utilities','Rent','Office','Tools','Parking','Subscriptions','Health','Misc'];
 
 let customFolders = [];
 let activeFolderId = 'personal';
 let receipts = []; // {id, folderId, date, establishment, amount, currency, category, notes, images:[dataURL], verified, needsCheck, confidences:{}}
 let receiptSeq = 1;
+
+// dashboard month being viewed — defaults to the current real-world month
+let viewedMonth = new Date().getMonth(); // 0-11
+let viewedYear = new Date().getFullYear();
+
+// search/filter panel state
+let activeFilters = { query:'', category:'', dateFrom:'', dateTo:'' };
 
 // capture session state
 let mediaStream = null;
@@ -729,14 +850,59 @@ function renderFolderTabs(){
 /* ============================================================
    RENDER: RECEIPT LIST
    ============================================================ */
+function receiptMatchesMonth(r){
+  if(!r.date) return false;
+  const d = new Date(r.date + 'T00:00:00');
+  return d.getMonth()===viewedMonth && d.getFullYear()===viewedYear;
+}
+
+function receiptMatchesFilters(r){
+  if(activeFilters.category && r.category !== activeFilters.category) return false;
+  if(activeFilters.query){
+    const q = activeFilters.query.toLowerCase();
+    const haystack = `${r.establishment||''} ${r.notes||''} ${r.category||''}`.toLowerCase();
+    if(!haystack.includes(q)) return false;
+  }
+  if(activeFilters.dateFrom && (!r.date || r.date < activeFilters.dateFrom)) return false;
+  if(activeFilters.dateTo && (!r.date || r.date > activeFilters.dateTo)) return false;
+  return true;
+}
+
+function hasActiveFilters(){
+  return !!(activeFilters.query || activeFilters.category || activeFilters.dateFrom || activeFilters.dateTo);
+}
+
 function renderReceiptList(){
-  const list = receipts.filter(r=>r.folderId===activeFolderId).sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  // when a search/filter is active, it searches across ALL months (not just the viewed one) —
+  // otherwise the list is scoped to whichever month is currently being viewed on the dashboard
+  const filtering = hasActiveFilters();
+  let list = receipts.filter(r=>r.folderId===activeFolderId);
+  list = filtering ? list.filter(receiptMatchesFilters) : list.filter(receiptMatchesMonth);
+  list = list.sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+
   const el = document.getElementById('receiptList');
   const empty = document.getElementById('emptyState');
   el.innerHTML = '';
   document.getElementById('receiptCount').innerText = list.length;
 
-  if(list.length===0){ empty.style.display='block'; }
+  const sectionLabel = document.getElementById('sectionLabelText');
+  if(sectionLabel){
+    sectionLabel.innerText = filtering ? 'Filtered results' : monthYearLabel(viewedMonth, viewedYear);
+  }
+  document.getElementById('filterActiveDot').style.display = filtering ? 'block' : 'none';
+
+  if(list.length===0){
+    empty.style.display='block';
+    const emptyTitle = empty.querySelector('h3');
+    const emptyText = empty.querySelector('p');
+    if(filtering){
+      if(emptyTitle) emptyTitle.innerText = 'No matches';
+      if(emptyText) emptyText.innerText = 'Nothing matches your current search or filters. Try adjusting them.';
+    } else {
+      if(emptyTitle) emptyTitle.innerText = 'No receipts here yet';
+      if(emptyText) emptyText.innerText = 'Capture or upload a receipt below to get started. Extracted data will be pre-filled for you to verify.';
+    }
+  }
   else{ empty.style.display='none'; }
 
   let total = 0;
@@ -781,6 +947,48 @@ function renderReceiptList(){
 
   document.getElementById('totalAmount').innerText = total.toFixed(2);
   document.getElementById('pendingSummary').innerText = `${pending} pending review`;
+
+  renderMonthNav();
+  renderSpendBars();
+}
+
+function monthYearLabel(month, year){
+  return new Date(year, month, 1).toLocaleDateString('en-AU', {month:'long', year:'numeric'});
+}
+
+function renderMonthNav(){
+  document.getElementById('monthNavLabel').innerText = monthYearLabel(viewedMonth, viewedYear);
+}
+
+function changeMonth(delta){
+  viewedMonth += delta;
+  if(viewedMonth > 11){ viewedMonth = 0; viewedYear++; }
+  if(viewedMonth < 0){ viewedMonth = 11; viewedYear--; }
+  renderReceiptList();
+}
+
+function renderSpendBars(){
+  const folderReceipts = receipts.filter(r=>r.folderId===activeFolderId && r.currency==='AUD');
+
+  const currentTotal = folderReceipts
+    .filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getMonth()===viewedMonth && d.getFullYear()===viewedYear; })
+    .reduce((sum,r)=> sum + (parseFloat(r.amount)||0), 0);
+
+  let prevMonth = viewedMonth - 1, prevYear = viewedYear;
+  if(prevMonth < 0){ prevMonth = 11; prevYear--; }
+  const prevTotal = folderReceipts
+    .filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getMonth()===prevMonth && d.getFullYear()===prevYear; })
+    .reduce((sum,r)=> sum + (parseFloat(r.amount)||0), 0);
+
+  const maxVal = Math.max(currentTotal, prevTotal, 1); // avoid divide-by-zero when both are 0
+
+  document.getElementById('currentMonthLabel').innerText = monthYearLabel(viewedMonth, viewedYear);
+  document.getElementById('currentMonthAmount').innerText = `$${currentTotal.toFixed(2)}`;
+  document.getElementById('currentMonthFill').style.width = `${(currentTotal/maxVal)*100}%`;
+
+  document.getElementById('prevMonthLabel').innerText = monthYearLabel(prevMonth, prevYear);
+  document.getElementById('prevMonthAmount').innerText = `$${prevTotal.toFixed(2)}`;
+  document.getElementById('prevMonthFill').style.width = `${(prevTotal/maxVal)*100}%`;
 }
 
 function categoryColor(cat){
@@ -795,6 +1003,29 @@ function formatDate(d){
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 function renderAll(){ renderFolderTabs(); renderReceiptList(); persistState(); }
+document.getElementById('versionBadge').innerText = 'v' + APP_VERSION;
+
+document.getElementById('monthPrevBtn').onclick = ()=> changeMonth(-1);
+document.getElementById('monthNextBtn').onclick = ()=> changeMonth(1);
+document.getElementById('monthTodayBtn').onclick = ()=>{
+  viewedMonth = new Date().getMonth();
+  viewedYear = new Date().getFullYear();
+  renderReceiptList();
+};
+// tapping the month label itself opens a quick year/month jump prompt — useful for
+// navigating further back than a few taps of the arrows would be worth
+document.getElementById('monthNavLabel').onclick = ()=>{
+  const input = prompt('Jump to month (format: YYYY-MM, e.g. 2026-03)', `${viewedYear}-${String(viewedMonth+1).padStart(2,'0')}`);
+  if(!input) return;
+  const m = input.match(/^(\d{4})-(\d{1,2})$/);
+  if(m){
+    viewedYear = parseInt(m[1],10);
+    viewedMonth = parseInt(m[2],10) - 1;
+    renderReceiptList();
+  } else {
+    showToast('Use format YYYY-MM, e.g. 2026-03');
+  }
+};
 
 // on startup: load whatever was saved from a previous session before the first render,
 // so re-opening the app shows exactly where you left off rather than an empty list
@@ -1041,6 +1272,26 @@ async function ocrSpaceRecognize(dataUrl, attempt=1){
 
   const parsedText = (json.ParsedResults || []).map(r=>r.ParsedText).join('\n');
   return parsedText;
+}
+
+/* ============================================================
+   CATEGORY USAGE (tracks how often each category is used, so the
+   pop-out grid can surface your most-used categories first)
+   ============================================================ */
+function getCategoryUsage(){
+  try{
+    return JSON.parse(localStorage.getItem('category_usage') || '{}');
+  }catch(e){ return {}; }
+}
+function recordCategoryUsage(category){
+  if(!category) return;
+  const usage = getCategoryUsage();
+  usage[category] = (usage[category]||0) + 1;
+  localStorage.setItem('category_usage', JSON.stringify(usage));
+}
+function getCategoriesSortedByUsage(){
+  const usage = getCategoryUsage();
+  return [...CATEGORIES].sort((a,b)=> (usage[b]||0) - (usage[a]||0));
 }
 
 /* ============================================================
@@ -1486,24 +1737,120 @@ function renderCatGrid(selectedCat){
 
   select.onchange = ()=>{
     if(select.value==='__add_new__'){
-      const name = prompt('Name your new category (e.g. "Rent", "Childcare")');
-      if(name && name.trim()){
-        const clean = name.trim();
-        if(!CATEGORIES.includes(clean)){
-          CATEGORIES.push(clean);
-          persistCategories();
-        }
+      const prevCategory = currentReviewDraft.category;
+      promptAddCategory((clean)=>{
         currentReviewDraft.category = clean;
-        renderCatGrid(clean);
-      } else {
-        // user cancelled — revert selector to whatever it was before
-        renderCatGrid(currentReviewDraft.category);
-      }
+      });
+      renderCatGrid(currentReviewDraft.category === prevCategory ? prevCategory : currentReviewDraft.category);
       return;
     }
     currentReviewDraft.category = select.value;
   };
 }
+
+// shared by both the dropdown and the pop-out grid, so adding a category behaves
+// identically no matter which entry point was used
+function promptAddCategory(onCreated){
+  const name = prompt('Name your new category (e.g. "Rent", "Childcare")');
+  if(name && name.trim()){
+    const clean = name.trim();
+    if(!CATEGORIES.includes(clean)){
+      CATEGORIES.push(clean);
+      persistCategories();
+    }
+    onCreated(clean);
+  }
+}
+
+function openCatGridPopout(){
+  renderCatPopoutGrid(currentReviewDraft.category);
+  document.getElementById('catGridBackdrop').classList.add('open');
+  document.getElementById('catGridSheet').classList.add('open');
+}
+function closeCatGridPopout(){
+  document.getElementById('catGridBackdrop').classList.remove('open');
+  document.getElementById('catGridSheet').classList.remove('open');
+}
+function renderCatPopoutGrid(selectedCat){
+  const grid = document.getElementById('catPopoutGrid');
+  grid.innerHTML = '';
+  const sorted = getCategoriesSortedByUsage();
+  const options = sorted.includes(selectedCat) ? sorted : [...sorted, selectedCat];
+  options.forEach(cat=>{
+    const btn = document.createElement('div');
+    btn.className = 'cat-opt' + (cat===selectedCat ? ' selected':'');
+    btn.innerText = cat;
+    btn.onclick = ()=>{
+      currentReviewDraft.category = cat;
+      renderCatGrid(cat); // keep dropdown in sync
+      closeCatGridPopout();
+    };
+    grid.appendChild(btn);
+  });
+}
+
+/* ============================================================
+   SEARCH / FILTER PANEL
+   ============================================================ */
+function openSearchPanel(){
+  // populate category dropdown fresh each time in case new categories were added
+  const catSelect = document.getElementById('searchCategorySelect');
+  catSelect.innerHTML = '<option value="">All categories</option>';
+  CATEGORIES.forEach(cat=>{
+    const opt = document.createElement('option');
+    opt.value = cat; opt.innerText = cat;
+    if(cat===activeFilters.category) opt.selected = true;
+    catSelect.appendChild(opt);
+  });
+  document.getElementById('searchQueryInput').value = activeFilters.query;
+  document.getElementById('searchDateFrom').value = activeFilters.dateFrom;
+  document.getElementById('searchDateTo').value = activeFilters.dateTo;
+
+  document.getElementById('searchBackdrop').classList.add('open');
+  document.getElementById('searchSheet').classList.add('open');
+}
+function closeSearchPanel(){
+  document.getElementById('searchBackdrop').classList.remove('open');
+  document.getElementById('searchSheet').classList.remove('open');
+}
+
+document.getElementById('btnOpenSearch').onclick = openSearchPanel;
+document.getElementById('searchCloseBtn').onclick = closeSearchPanel;
+document.getElementById('searchBackdrop').onclick = closeSearchPanel;
+
+document.getElementById('btnApplyFilters').onclick = ()=>{
+  activeFilters = {
+    query: document.getElementById('searchQueryInput').value.trim(),
+    category: document.getElementById('searchCategorySelect').value,
+    dateFrom: document.getElementById('searchDateFrom').value,
+    dateTo: document.getElementById('searchDateTo').value,
+  };
+  closeSearchPanel();
+  renderReceiptList();
+  if(hasActiveFilters()) showToast('Filters applied');
+};
+
+document.getElementById('btnClearFilters').onclick = ()=>{
+  activeFilters = { query:'', category:'', dateFrom:'', dateTo:'' };
+  document.getElementById('searchQueryInput').value = '';
+  document.getElementById('searchCategorySelect').value = '';
+  document.getElementById('searchDateFrom').value = '';
+  document.getElementById('searchDateTo').value = '';
+  closeSearchPanel();
+  renderReceiptList();
+  showToast('Filters cleared');
+};
+
+document.getElementById('btnCatGridOpen').onclick = openCatGridPopout;
+document.getElementById('catGridCloseBtn').onclick = closeCatGridPopout;
+document.getElementById('catGridBackdrop').onclick = closeCatGridPopout;
+document.getElementById('btnCatGridAddNew').onclick = ()=>{
+  promptAddCategory((clean)=>{
+    currentReviewDraft.category = clean;
+    renderCatGrid(clean);
+    renderCatPopoutGrid(clean);
+  });
+};
 
 function confBadge(elId, level){
   const el = document.getElementById(elId);
@@ -1682,6 +2029,7 @@ document.getElementById('btnConfirm').onclick = ()=>{
 
   // learn this merchant so future receipts from the same place are recognised instantly
   rememberMerchant(currentReviewDraft.establishment, currentReviewDraft.category);
+  recordCategoryUsage(currentReviewDraft.category);
 
   if(editingExistingId){
     const i = receipts.findIndex(r=>r.id===editingExistingId);
@@ -1715,8 +2063,81 @@ const storageBackdrop = document.getElementById('storageBackdrop');
 document.getElementById('btnStorageInfo').onclick = ()=>{
   document.getElementById('inputApiKey').value = localStorage.getItem('ocrspace_key') || '';
   renderMerchantList();
+  renderCategoryManageList();
   storageBackdrop.classList.add('open');
   storageSheet.classList.add('open');
+};
+
+// the original built-in set — protected from deletion so existing receipts never
+// end up pointing at a category that no longer exists in the list
+const DEFAULT_CATEGORIES = new Set(['Meals','Groceries','Fuel','Materials','Software','Travel','Utilities','Rent','Office','Tools','Parking','Subscriptions','Health','Misc']);
+
+function renderCategoryManageList(){
+  const container = document.getElementById('categoryManageList');
+  const usage = getCategoryUsage();
+  container.innerHTML = '';
+  const sorted = getCategoriesSortedByUsage();
+  sorted.forEach(cat=>{
+    const count = usage[cat] || 0;
+    const isDefault = DEFAULT_CATEGORIES.has(cat);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:9px 12px; background:var(--card); border:1px solid var(--rule); border-radius:10px; margin-bottom:6px;';
+    row.innerHTML = `
+      <div style="min-width:0;">
+        <div style="font-size:13px; font-weight:700; color:var(--ink);">${escapeHtml(cat)}</div>
+        <div style="font-size:11px; color:var(--ink-soft);">${count} receipt${count===1?'':'s'}${isDefault ? ' · built-in' : ''}</div>
+      </div>
+      <div style="display:flex; gap:6px; flex:0 0 auto;">
+        <button class="cat-rename-btn" style="background:var(--paper-dim); border:none; color:var(--ink-soft); width:28px; height:28px; border-radius:50%; font-size:12px; cursor:pointer;">✎</button>
+        ${isDefault ? '' : '<button class="cat-delete-btn" style="background:var(--paper-dim); border:none; color:var(--ink-soft); width:28px; height:28px; border-radius:50%; font-size:13px; cursor:pointer;">✕</button>'}
+      </div>
+    `;
+    row.querySelector('.cat-rename-btn').addEventListener('click', ()=>{
+      const newName = prompt(`Rename "${cat}" to:`, cat);
+      if(newName && newName.trim() && newName.trim()!==cat){
+        const clean = newName.trim();
+        // update the category list itself
+        const idx = CATEGORIES.indexOf(cat);
+        if(idx>-1) CATEGORIES[idx] = clean;
+        // re-point every existing receipt using the old name to the new one
+        receipts.forEach(r=>{ if(r.category===cat) r.category = clean; });
+        // carry over usage count under the new name
+        const usageMap = getCategoryUsage();
+        if(usageMap[cat]){ usageMap[clean] = (usageMap[clean]||0) + usageMap[cat]; delete usageMap[cat]; }
+        localStorage.setItem('category_usage', JSON.stringify(usageMap));
+        persistCategories();
+        renderAll();
+        renderCategoryManageList();
+        showToast(`Renamed to "${clean}"`);
+      }
+    });
+    const deleteBtn = row.querySelector('.cat-delete-btn');
+    if(deleteBtn){
+      deleteBtn.addEventListener('click', ()=>{
+        if(count>0){
+          if(!confirm(`"${cat}" is used on ${count} receipt${count===1?'':'s'}. Deleting it will re-categorise ${count===1?'that receipt':'those receipts'} as "Misc". Continue?`)) return;
+          receipts.forEach(r=>{ if(r.category===cat) r.category='Misc'; });
+        }
+        const idx = CATEGORIES.indexOf(cat);
+        if(idx>-1) CATEGORIES.splice(idx,1);
+        const usageMap = getCategoryUsage();
+        delete usageMap[cat];
+        localStorage.setItem('category_usage', JSON.stringify(usageMap));
+        persistCategories();
+        renderAll();
+        renderCategoryManageList();
+        showToast(`"${cat}" removed`);
+      });
+    }
+    container.appendChild(row);
+  });
+}
+
+document.getElementById('btnMenuAddCategory').onclick = ()=>{
+  promptAddCategory((clean)=>{
+    renderCategoryManageList();
+    showToast(`"${clean}" added`);
+  });
 };
 
 function renderMerchantList(){
