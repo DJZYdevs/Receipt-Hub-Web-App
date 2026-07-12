@@ -186,8 +186,8 @@
     background:rgba(255,255,255,0.08); border-radius:10px;
   }
   .multi-toggle label{color:#fff; font-size:12.5px; font-weight:600;}
-  .switch{position:relative; width:38px; height:22px; flex:0 0 auto;}
-  .switch input{opacity:0; width:0; height:0;}
+  .switch{position:relative; width:38px; height:22px; flex:0 0 auto; display:inline-block;}
+  .switch input{position:absolute; inset:0; width:100%; height:100%; opacity:0; margin:0; cursor:pointer; z-index:2;}
   .slider{position:absolute; inset:0; background:rgba(255,255,255,0.25); border-radius:20px; cursor:pointer; transition:.2s;}
   .slider:before{content:""; position:absolute; height:16px; width:16px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.2s;}
   input:checked + .slider{background:var(--sage);}
@@ -405,11 +405,11 @@
       <div class="cam-frame-hint"></div>
     </div>
     <div class="cam-caps-strip" id="camCapsStrip"></div>
-    <div class="multi-toggle">
-      <label for="multiToggle">Multi-page receipt (keep camera open after each shot)</label>
+    <div class="multi-toggle" id="multiToggleRow" style="cursor:pointer;">
+      <label for="multiToggle" style="pointer-events:none;">Multi-page receipt (keep camera open after each shot)</label>
       <div class="switch">
         <input type="checkbox" id="multiToggle">
-        <span class="slider"></span>
+        <span class="slider" style="pointer-events:none;"></span>
       </div>
     </div>
     <div class="cam-controls">
@@ -528,7 +528,9 @@
       <p>A Drive folder is ready to receive your receipts: <strong>Engineer of Things — Receipts</strong>, with Personal / Work / Investments / Other subfolders matching the app.</p>
       <a href="https://drive.google.com/drive/folders/1F68n8iMC3T1AVHTEU0rUDs8Q_7fpfJsN" target="_blank" style="display:block; text-align:center; padding:12px; border-radius:12px; background:var(--sage-deep); color:#fff; text-decoration:none; font-size:13.5px; font-weight:700; margin:10px 0;">Open Drive folder ↗</a>
       <p style="margin-top:-4px;">This static file can't upload to Drive directly from your phone (no backend to hold the sign-in), so for now: tap <strong>Export receipts</strong> below, then share the downloaded file to the Drive app's folder above. A direct in-app upload would need a small backend — let me know if you want that built next.</p>
-      <button id="btnExportReceipts" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid var(--sage); background:var(--sage-pale); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer; margin-top:4px;">Export receipts (JSON)</button>
+      <button id="btnExportReceipts" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid var(--sage); background:var(--sage-pale); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer; margin-top:4px;">Export data only (fast, small file)</button>
+      <button id="btnExportReceiptsWithImages" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid var(--sage); background:var(--card); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer; margin-top:8px;">Export with photos (compressed)</button>
+      <p style="margin-top:8px; font-size:11px;">"Data only" is a few KB — dates, amounts, categories, notes — great for spreadsheets. "With photos" compresses each image before export so the file stays a reasonable size instead of ballooning with full-resolution camera photos.</p>
 
       <h4>What gets archived per receipt</h4>
       <p>Original image(s), extracted fields, your verified/edited values, timestamp of verification, and folder/category — so every entry is fully auditable later.</p>
@@ -579,7 +581,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const CATEGORIES = ['Meals','Fuel','Materials','Software','Travel','Utilities','Office','Tools','Parking','Subscriptions','Health','Misc'];
+const CATEGORIES = ['Meals','Groceries','Fuel','Materials','Software','Travel','Utilities','Rent','Office','Tools','Parking','Subscriptions','Health','Misc'];
 
 let customFolders = [];
 let activeFolderId = 'personal';
@@ -657,22 +659,32 @@ function persistState(){
       await idbSet('customFolders', customFolders);
       await idbSet('receiptSeq', receiptSeq);
       await idbSet('activeFolderId', activeFolderId);
+      await idbSet('categories', CATEGORIES);
     }catch(err){
       console.error('Failed to save to IndexedDB', err);
       showToast('⚠ Could not save — storage may be full');
     }
   }, 250);
 }
+// separate lightweight helper for saving just the category list (e.g. right after
+// adding a new one, without waiting on the debounced full-state save)
+function persistCategories(){
+  idbSet('categories', CATEGORIES).catch(err=> console.error('Failed to save categories', err));
+}
 
 async function loadPersistedState(){
   try{
-    const [savedReceipts, savedFolders, savedSeq, savedActiveFolder] = await Promise.all([
-      idbGet('receipts'), idbGet('customFolders'), idbGet('receiptSeq'), idbGet('activeFolderId')
+    const [savedReceipts, savedFolders, savedSeq, savedActiveFolder, savedCategories] = await Promise.all([
+      idbGet('receipts'), idbGet('customFolders'), idbGet('receiptSeq'), idbGet('activeFolderId'), idbGet('categories')
     ]);
     if(savedReceipts) receipts = savedReceipts;
     if(savedFolders) customFolders = savedFolders;
     if(savedSeq) receiptSeq = savedSeq;
     if(savedActiveFolder) activeFolderId = savedActiveFolder;
+    if(savedCategories && savedCategories.length){
+      // merge saved custom categories with the current defaults, avoiding duplicates
+      savedCategories.forEach(c=>{ if(!CATEGORIES.includes(c)) CATEGORIES.push(c); });
+    }
     return true;
   }catch(err){
     console.error('Failed to load from IndexedDB', err);
@@ -820,13 +832,29 @@ function closeCamera(){
 document.getElementById('btnCamera').onclick = openCamera;
 document.getElementById('camClose').onclick = closeCamera;
 
+document.getElementById('multiToggleRow').addEventListener('click', (e)=>{
+  // avoid double-toggling if the tap landed directly on the checkbox input itself
+  if(e.target.id==='multiToggle') return;
+  const cb = document.getElementById('multiToggle');
+  cb.checked = !cb.checked;
+});
+
 document.getElementById('shutterBtn').onclick = ()=>{
   const w = camVideo.videoWidth, h = camVideo.videoHeight;
   if(!w || !h) return;
-  camCanvas.width = w; camCanvas.height = h;
+  // cap the stored resolution — full camera resolution (often 3000px+) is overkill for
+  // OCR and receipt viewing, and needlessly bloats IndexedDB storage and exports
+  const maxDim = 1600;
+  let targetW = w, targetH = h;
+  if(w > maxDim || h > maxDim){
+    const scale = maxDim / Math.max(w, h);
+    targetW = Math.round(w * scale);
+    targetH = Math.round(h * scale);
+  }
+  camCanvas.width = targetW; camCanvas.height = targetH;
   const ctx = camCanvas.getContext('2d');
-  ctx.drawImage(camVideo, 0, 0, w, h);
-  const dataUrl = camCanvas.toDataURL('image/jpeg', 0.85);
+  ctx.drawImage(camVideo, 0, 0, targetW, targetH);
+  const dataUrl = camCanvas.toDataURL('image/jpeg', 0.75);
   capturedImages.push(dataUrl);
   renderCapsStrip();
 
@@ -880,7 +908,10 @@ document.getElementById('fileInputLibrary').addEventListener('change', async (e)
   const files = Array.from(e.target.files);
   if(files.length===0) return;
   for(const f of files){
-    const dataUrl = await fileToDataUrl(f);
+    const rawDataUrl = await fileToDataUrl(f);
+    // photo library images can be much larger than camera captures (e.g. iPhone HEIC->JPEG
+    // conversions at full sensor resolution) — compress on the way in to keep storage/export sane
+    const dataUrl = await compressImage(rawDataUrl, 1600, 0.75);
     queueReceiptForOCR([dataUrl]); // each uploaded file = its own receipt for bulk processing
   }
   e.target.value = '';
@@ -890,7 +921,8 @@ document.getElementById('fileInputLibrary').addEventListener('change', async (e)
 document.getElementById('fileInputCameraFallback').addEventListener('change', async (e)=>{
   const files = Array.from(e.target.files);
   if(files.length===0) return;
-  const dataUrl = await fileToDataUrl(files[0]);
+  const rawDataUrl = await fileToDataUrl(files[0]);
+  const dataUrl = await compressImage(rawDataUrl, 1600, 0.75);
   queueReceiptForOCR([dataUrl]);
   e.target.value='';
   processQueue();
@@ -1447,7 +1479,30 @@ function renderCatGrid(selectedCat){
     if(cat===selectedCat) opt.selected = true;
     select.appendChild(opt);
   });
-  select.onchange = ()=>{ currentReviewDraft.category = select.value; };
+  const addOpt = document.createElement('option');
+  addOpt.value = '__add_new__';
+  addOpt.innerText = '+ Add new category…';
+  select.appendChild(addOpt);
+
+  select.onchange = ()=>{
+    if(select.value==='__add_new__'){
+      const name = prompt('Name your new category (e.g. "Rent", "Childcare")');
+      if(name && name.trim()){
+        const clean = name.trim();
+        if(!CATEGORIES.includes(clean)){
+          CATEGORIES.push(clean);
+          persistCategories();
+        }
+        currentReviewDraft.category = clean;
+        renderCatGrid(clean);
+      } else {
+        // user cancelled — revert selector to whatever it was before
+        renderCatGrid(currentReviewDraft.category);
+      }
+      return;
+    }
+    currentReviewDraft.category = select.value;
+  };
 }
 
 function confBadge(elId, level){
@@ -1707,17 +1762,87 @@ storageBackdrop.onclick = ()=>{
   storageSheet.classList.remove('open');
 };
 
+// re-encode a dataURL image at a smaller max dimension and lower JPEG quality,
+// so exports stay a reasonable size instead of carrying full-resolution camera photos
+function compressImage(dataUrl, maxDimension=1000, quality=0.6){
+  return new Promise((resolve)=>{
+    const img = new Image();
+    img.onload = ()=>{
+      let { width, height } = img;
+      if(width > maxDimension || height > maxDimension){
+        const scale = maxDimension / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = ()=> resolve(dataUrl); // fall back to original if it fails to load
+    img.src = dataUrl;
+  });
+}
+
+function buildExportRows(includeImages){
+  return receipts.map(r=>({
+    folder: (allFolders().find(f=>f.id===r.folderId)||{}).label || r.folderId,
+    date: r.date,
+    establishment: r.establishment,
+    amount: r.amount,
+    currency: r.currency,
+    gst: r.gst || null,
+    category: r.category,
+    notes: r.notes,
+    verified: r.verified,
+    imageCount: (r.images||[]).length,
+    ...(includeImages ? {} : {}) // images attached separately below when requested
+  }));
+}
+
+function downloadJson(exportData, filenamePrefix){
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `${filenamePrefix}-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 document.getElementById('btnExportReceipts').onclick = ()=>{
   if(receipts.length===0){
     showToast('No receipts to export yet');
     return;
   }
-  // export a clean, human-readable structure — images included as base64 so the
-  // export is fully self-contained (openable/re-importable without the app)
   const exportData = {
     exportedAt: new Date().toISOString(),
-    folders: allFolders().map(f=>({id:f.id, label:f.label})),
-    receipts: receipts.map(r=>({
+    note: 'Data-only export — no photos included. Use "Export with photos" for a version that includes images.',
+    receipts: buildExportRows(false)
+  };
+  downloadJson(exportData, 'receipts-data');
+  showToast(`Exported ${receipts.length} receipt${receipts.length===1?'':'s'} (data only)`);
+};
+
+document.getElementById('btnExportReceiptsWithImages').onclick = async ()=>{
+  if(receipts.length===0){
+    showToast('No receipts to export yet');
+    return;
+  }
+  const totalImages = receipts.reduce((sum,r)=> sum + (r.images||[]).length, 0);
+  showToast(`Compressing ${totalImages} photo${totalImages===1?'':'s'}…`);
+
+  const rows = [];
+  for(const r of receipts){
+    const compressedImages = [];
+    for(const img of (r.images||[])){
+      compressedImages.push(await compressImage(img));
+    }
+    rows.push({
       folder: (allFolders().find(f=>f.id===r.folderId)||{}).label || r.folderId,
       date: r.date,
       establishment: r.establishment,
@@ -1727,21 +1852,17 @@ document.getElementById('btnExportReceipts').onclick = ()=>{
       category: r.category,
       notes: r.notes,
       verified: r.verified,
-      imageCount: (r.images||[]).length,
-      images: r.images || []
-    }))
+      images: compressedImages
+    });
+  }
+
+  const exportData = {
+    exportedAt: new Date().toISOString(),
+    note: 'Photos compressed to max 1000px / JPEG quality 0.6 to keep file size manageable.',
+    receipts: rows
   };
-  const blob = new Blob([JSON.stringify(exportData, null, 2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  const stamp = new Date().toISOString().slice(0,10);
-  a.href = url;
-  a.download = `receipts-export-${stamp}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-  showToast(`Exported ${receipts.length} receipt${receipts.length===1?'':'s'} — share the download to Drive`);
+  downloadJson(exportData, 'receipts-with-photos');
+  showToast(`Exported ${receipts.length} receipt${receipts.length===1?'':'s'} with compressed photos`);
 };
 
 document.getElementById('btnClearAllData').onclick = ()=>{
