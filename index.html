@@ -29,6 +29,26 @@
   }
   .app{max-width:480px;margin:0 auto;position:relative;min-height:100vh;background:var(--paper);}
 
+  /* ---------- Login screen ---------- */
+  .login-screen{
+    position:fixed; inset:0; background:var(--paper); z-index:300;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .login-card{ width:100%; max-width:380px; }
+  .login-brand{ text-align:center; margin-bottom:18px; }
+  .login-brand h1{ font-size:24px; margin:4px 0 0; font-weight:700; letter-spacing:-0.02em; }
+  .login-warning{
+    font-size:11.5px; line-height:1.5; color:var(--amber); background:#F4E2D3;
+    padding:10px 12px; border-radius:10px; margin-bottom:18px; text-align:center;
+  }
+  .login-error{
+    font-size:12.5px; color:var(--red); background:#F4E2DD; padding:9px 12px;
+    border-radius:10px; margin-bottom:10px; text-align:center;
+  }
+  .login-hint{
+    font-size:11px; color:var(--ink-soft); text-align:center; margin-top:16px; font-family:var(--mono);
+  }
+
   /* ---------- Top bar / ledger header ---------- */
   .topbar{
     padding:22px 20px 16px;
@@ -166,6 +186,52 @@
   .cap-btn .ic{font-size:19px;}
   .cap-btn.primary{ background:var(--sage-deep); color:#fff; flex:1.3;}
   .cap-btn.secondary{ background:var(--paper-dim); color:var(--ink);}
+
+  /* ---------- Analysis page ---------- */
+  .analysis-view{
+    position:fixed; inset:0; background:var(--paper); z-index:95; display:none;
+    flex-direction:column; max-width:480px; margin:0 auto;
+  }
+  .analysis-view.open{display:flex;}
+  .analysis-top{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:calc(14px + env(safe-area-inset-top)) 20px 10px; border-bottom:1px solid var(--rule);
+  }
+  .analysis-controls{ padding:14px 20px; border-bottom:1px solid var(--rule); }
+  .period-tabs{ display:flex; gap:6px; margin-bottom:10px; }
+  .period-tab{
+    flex:1; padding:8px 4px; border-radius:9px; border:1px solid var(--rule); background:var(--card);
+    color:var(--ink-soft); font-size:12px; font-weight:700; cursor:pointer;
+  }
+  .period-tab.active{ background:var(--ink); color:var(--paper); border-color:var(--ink); }
+  .analysis-row{ display:flex; gap:8px; align-items:center; }
+  .year-nav{
+    display:flex; align-items:center; gap:8px; flex:0 0 auto;
+    padding:6px 10px; border-radius:9px; border:1px solid var(--rule); background:var(--card);
+  }
+  .year-nav span{ font-size:13px; font-weight:700; min-width:44px; text-align:center; }
+  .analysis-body{ flex:1; overflow-y:auto; padding:18px 20px calc(30px + env(safe-area-inset-bottom)); }
+  .analysis-total-card{
+    background:var(--card); border:1px solid var(--rule); border-radius:14px; padding:16px 18px; margin-bottom:20px;
+  }
+  .analysis-total-card .sub{ font-size:11px; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.08em; margin-bottom:4px; }
+  .analysis-total-card .num{ font-size:28px; font-weight:700; letter-spacing:-0.02em; }
+  .analysis-total-card .curr{ font-size:14px; color:var(--ink-soft); font-weight:600; margin-right:2px; }
+  .analysis-chart{ display:flex; flex-direction:column; gap:10px; margin-bottom:24px; }
+  .achart-row{ display:flex; align-items:center; gap:10px; }
+  .achart-label{ flex:0 0 64px; font-size:11.5px; color:var(--ink-soft); font-weight:600; text-align:right; }
+  .achart-track{ flex:1; height:20px; border-radius:6px; background:var(--paper-dim); overflow:hidden; position:relative; }
+  .achart-fill{ height:100%; border-radius:6px; background:var(--sage-deep); transition:width .3s; }
+  .achart-value{ flex:0 0 64px; font-size:11.5px; font-family:var(--mono); color:var(--ink); text-align:right; }
+  .analysis-section-label{
+    font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-soft); margin-bottom:10px;
+  }
+  .analysis-cat-breakdown{ display:flex; flex-direction:column; gap:8px; }
+  .acat-row{ display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--card); border:1px solid var(--rule); border-radius:10px; }
+  .acat-name{ display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600; }
+  .acat-dot{ width:8px; height:8px; border-radius:50%; flex:0 0 auto; }
+  .acat-amount{ font-family:var(--mono); font-size:13px; font-weight:700; }
 
   /* ---------- Camera overlay ---------- */
   .camera-view{
@@ -371,7 +437,28 @@
 </style>
 </head>
 <body>
-<div class="app">
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-mark">Engineer of Things · Ledger <span id="loginVersionBadge" style="opacity:0.6; font-weight:400;"></span></div>
+      <h1>Receipt Hub</h1>
+    </div>
+    <p class="login-warning">⚠ Testing build — this login only separates data locally on this device. It is not real account security.</p>
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="loginUsername" autocapitalize="none" autocorrect="off" placeholder="admin">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="loginPassword" placeholder="••••••••">
+    </div>
+    <div id="loginError" class="login-error" style="display:none;"></div>
+    <button id="btnLogin" class="btn confirm" style="width:100%; margin-top:6px;">Log in</button>
+    <p class="login-hint">Test accounts: <strong>admin</strong> / DJZYdevs &nbsp;·&nbsp; <strong>admin2</strong> / test</p>
+  </div>
+</div>
+
+<div class="app" id="appRoot" style="display:none;">
 
   <!-- TOP BAR -->
   <div class="topbar">
@@ -380,7 +467,10 @@
         <div class="brand-mark">Engineer of Things · Ledger <span id="versionBadge" style="opacity:0.6; font-weight:400;">v1.0</span></div>
         <h1>Receipts</h1>
       </div>
-      <div class="folder-chip" id="activeFolderChip">📁 Personal</div>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+        <div class="folder-chip" id="activeFolderChip">📁 Personal</div>
+        <button id="btnOpenAnalysis" style="background:var(--sage-pale); border:1px solid #c9d8cb; color:var(--sage-deep); padding:6px 10px; border-radius:20px; font-size:11.5px; font-weight:700; cursor:pointer;">📊 Analysis</button>
+      </div>
     </div>
     <div class="running-total">
       <div>
@@ -448,6 +538,45 @@
 
   <input type="file" id="fileInputLibrary" accept="image/*" multiple>
   <input type="file" id="fileInputCameraFallback" accept="image/*" capture="environment">
+
+  <!-- ANALYSIS PAGE -->
+  <div class="analysis-view" id="analysisView">
+    <div class="analysis-top">
+      <div class="cam-title" style="color:var(--ink-soft);">Spending analysis</div>
+      <button class="sheet-close" id="analysisCloseBtn">✕</button>
+    </div>
+
+    <div class="analysis-controls">
+      <div class="period-tabs" id="periodTabs">
+        <button class="period-tab active" data-period="monthly">Monthly</button>
+        <button class="period-tab" data-period="quarterly">Quarterly</button>
+        <button class="period-tab" data-period="halfyear">6 Months</button>
+        <button class="period-tab" data-period="yearly">Yearly</button>
+      </div>
+      <div class="analysis-row">
+        <div class="year-nav" id="analysisYearNav">
+          <button class="month-nav-btn" id="analysisYearPrev">◀</button>
+          <span id="analysisYearLabel">2026</span>
+          <button class="month-nav-btn" id="analysisYearNext">▶</button>
+        </div>
+        <select id="analysisFolderSelect" style="flex:1; padding:8px 10px; border-radius:9px; border:1px solid var(--rule); font-size:12.5px; background:var(--card); color:var(--ink);">
+          <option value="__all__">All folders</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="analysis-body">
+      <div class="analysis-total-card">
+        <div class="sub">Total for this range</div>
+        <div class="num"><span class="curr">AUD</span><span id="analysisTotalAmount">0.00</span></div>
+      </div>
+
+      <div class="analysis-chart" id="analysisChart"></div>
+
+      <div class="analysis-section-label">By category</div>
+      <div class="analysis-cat-breakdown" id="analysisCatBreakdown"></div>
+    </div>
+  </div>
 
   <!-- CAMERA VIEW -->
   <div class="camera-view" id="cameraView">
@@ -581,6 +710,10 @@
       <button class="sheet-close" id="storageCloseBtn">✕</button>
     </div>
     <div class="form-body">
+      <h4 style="margin-top:0;">Account</h4>
+      <p>Logged in as <strong id="menuCurrentUser">admin</strong>. Each account keeps its own separate receipts on this device — remember this is a testing-only gate, not real account security.</p>
+      <button id="btnLogout" style="width:100%; padding:12px; border-radius:11px; border:1.5px solid var(--rule); background:var(--paper-dim); color:var(--ink); font-size:13.5px; font-weight:700; cursor:pointer; margin-bottom:6px;">Log out</button>
+
       <p>Receipts are saved to this browser's local storage (IndexedDB), so closing the app or restarting your phone won't lose anything — it'll be exactly as you left it next time you open this file. This is device-local, not a cloud account, so it won't sync across phones/browsers on its own.</p>
 
       <h4>Google Drive archive</h4>
@@ -694,8 +827,20 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.4.0'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
+const APP_VERSION = '1.5.0'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
 const CATEGORIES = ['Meals','Groceries','Fuel','Materials','Software','Travel','Utilities','Rent','Office','Tools','Parking','Subscriptions','Health','Misc'];
+
+// ⚠️ TESTING-ONLY USER GATE — NOT REAL SECURITY.
+// These credentials live in plain text in this file, visible to anyone who opens it in
+// a text editor or views page source. This only keeps each username's receipt data
+// separated in local browser storage on ONE device for demo/testing purposes. It is not
+// authentication, and this file must never be used for real users' private data as-is —
+// that would require a real backend.
+const USERS = [
+  { username: 'admin', password: 'DJZYdevs' },
+  { username: 'admin2', password: 'test' },
+];
+let currentUser = null;
 
 let customFolders = [];
 let activeFolderId = 'personal';
@@ -772,15 +917,19 @@ async function idbGet(key){
 // debounced save so rapid successive changes (e.g. typing in a field) don't
 // trigger a disk write on every keystroke
 let saveTimer = null;
+function userKey(key){
+  return `${currentUser}:${key}`;
+}
 function persistState(){
+  if(!currentUser) return; // never write before a user is logged in
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async ()=>{
     try{
-      await idbSet('receipts', receipts);
-      await idbSet('customFolders', customFolders);
-      await idbSet('receiptSeq', receiptSeq);
-      await idbSet('activeFolderId', activeFolderId);
-      await idbSet('categories', CATEGORIES);
+      await idbSet(userKey('receipts'), receipts);
+      await idbSet(userKey('customFolders'), customFolders);
+      await idbSet(userKey('receiptSeq'), receiptSeq);
+      await idbSet(userKey('activeFolderId'), activeFolderId);
+      await idbSet(userKey('categories'), CATEGORIES);
     }catch(err){
       console.error('Failed to save to IndexedDB', err);
       showToast('⚠ Could not save — storage may be full');
@@ -790,20 +939,49 @@ function persistState(){
 // separate lightweight helper for saving just the category list (e.g. right after
 // adding a new one, without waiting on the debounced full-state save)
 function persistCategories(){
-  idbSet('categories', CATEGORIES).catch(err=> console.error('Failed to save categories', err));
+  if(!currentUser) return;
+  idbSet(userKey('categories'), CATEGORIES).catch(err=> console.error('Failed to save categories', err));
+}
+
+// one-time migration: data saved before multi-user support existed lived under plain
+// keys ('receipts', not 'admin:receipts'). The first time 'admin' logs in, adopt that
+// legacy data as admin's own so nothing already scanned appears to vanish.
+async function migrateLegacyDataToAdmin(){
+  try{
+    const legacyReceipts = await idbGet('receipts');
+    const alreadyMigrated = await idbGet('admin:migrated');
+    if(legacyReceipts && !alreadyMigrated){
+      const [legacyFolders, legacySeq, legacyActiveFolder, legacyCategories] = await Promise.all([
+        idbGet('customFolders'), idbGet('receiptSeq'), idbGet('activeFolderId'), idbGet('categories')
+      ]);
+      await idbSet('admin:receipts', legacyReceipts);
+      if(legacyFolders) await idbSet('admin:customFolders', legacyFolders);
+      if(legacySeq) await idbSet('admin:receiptSeq', legacySeq);
+      if(legacyActiveFolder) await idbSet('admin:activeFolderId', legacyActiveFolder);
+      if(legacyCategories) await idbSet('admin:categories', legacyCategories);
+      await idbSet('admin:migrated', true);
+    }
+  }catch(err){
+    console.error('Legacy data migration failed', err);
+  }
 }
 
 async function loadPersistedState(){
   try{
+    if(currentUser==='admin') await migrateLegacyDataToAdmin();
     const [savedReceipts, savedFolders, savedSeq, savedActiveFolder, savedCategories] = await Promise.all([
-      idbGet('receipts'), idbGet('customFolders'), idbGet('receiptSeq'), idbGet('activeFolderId'), idbGet('categories')
+      idbGet(userKey('receipts')), idbGet(userKey('customFolders')), idbGet(userKey('receiptSeq')),
+      idbGet(userKey('activeFolderId')), idbGet(userKey('categories'))
     ]);
-    if(savedReceipts) receipts = savedReceipts;
-    if(savedFolders) customFolders = savedFolders;
-    if(savedSeq) receiptSeq = savedSeq;
-    if(savedActiveFolder) activeFolderId = savedActiveFolder;
+    receipts = savedReceipts || [];
+    customFolders = savedFolders || [];
+    receiptSeq = savedSeq || 1;
+    activeFolderId = savedActiveFolder || 'personal';
+    // reset CATEGORIES to defaults then merge in this user's saved custom categories,
+    // so switching users doesn't leak one user's custom categories into another's list
+    CATEGORIES.length = 0;
+    DEFAULT_CATEGORIES.forEach(c=> CATEGORIES.push(c));
     if(savedCategories && savedCategories.length){
-      // merge saved custom categories with the current defaults, avoiding duplicates
       savedCategories.forEach(c=>{ if(!CATEGORIES.includes(c)) CATEGORIES.push(c); });
     }
     return true;
@@ -991,6 +1169,149 @@ function renderSpendBars(){
   document.getElementById('prevMonthFill').style.width = `${(prevTotal/maxVal)*100}%`;
 }
 
+/* ============================================================
+   ANALYSIS PAGE
+   ============================================================ */
+let analysisPeriod = 'monthly'; // monthly | quarterly | halfyear | yearly
+let analysisYear = new Date().getFullYear();
+let analysisFolder = '__all__';
+
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function openAnalysisPage(){
+  // populate folder dropdown fresh (custom folders may have been added since last open)
+  const sel = document.getElementById('analysisFolderSelect');
+  const prevVal = analysisFolder;
+  sel.innerHTML = '<option value="__all__">All folders</option>';
+  allFolders().forEach(f=>{
+    const opt = document.createElement('option');
+    opt.value = f.id; opt.innerText = f.label;
+    sel.appendChild(opt);
+  });
+  sel.value = prevVal;
+  renderAnalysisPage();
+  document.getElementById('analysisView').classList.add('open');
+}
+function closeAnalysisPage(){
+  document.getElementById('analysisView').classList.remove('open');
+}
+
+function getAnalysisReceipts(){
+  let list = receipts.filter(r=> r.currency==='AUD');
+  if(analysisFolder !== '__all__') list = list.filter(r=> r.folderId===analysisFolder);
+  return list;
+}
+
+function renderAnalysisPage(){
+  document.getElementById('analysisYearLabel').innerText = analysisYear;
+  // the year nav is meaningless for the "yearly" comparison view (which spans multiple
+  // years by design), so hide it there and only show it for single-year-scoped views
+  document.getElementById('analysisYearNav').style.display = analysisPeriod==='yearly' ? 'none' : 'flex';
+
+  const list = getAnalysisReceipts();
+  const chart = document.getElementById('analysisChart');
+  chart.innerHTML = '';
+
+  let buckets = []; // [{label, total}]
+
+  if(analysisPeriod==='monthly'){
+    buckets = MONTH_ABBR.map((label, i)=>({
+      label,
+      total: list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===analysisYear && d.getMonth()===i; })
+                  .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0)
+    }));
+  } else if(analysisPeriod==='quarterly'){
+    buckets = [0,1,2,3].map(q=>({
+      label: `Q${q+1}`,
+      total: list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===analysisYear && Math.floor(d.getMonth()/3)===q; })
+                  .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0)
+    }));
+  } else if(analysisPeriod==='halfyear'){
+    buckets = [0,1].map(h=>({
+      label: h===0 ? 'H1 (Jan–Jun)' : 'H2 (Jul–Dec)',
+      total: list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===analysisYear && Math.floor(d.getMonth()/6)===h; })
+                  .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0)
+    }));
+  } else if(analysisPeriod==='yearly'){
+    // compare the 5 years ending at analysisYear, so "year nav" (hidden here) isn't
+    // needed — instead this view always shows a trailing 5-year window anchored to today
+    const endYear = new Date().getFullYear();
+    const startYear = endYear - 4;
+    buckets = [];
+    for(let y=startYear; y<=endYear; y++){
+      buckets.push({
+        label: String(y),
+        total: list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===y; })
+                    .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0)
+      });
+    }
+  }
+
+  const maxVal = Math.max(...buckets.map(b=>b.total), 1);
+  const rangeTotal = buckets.reduce((s,b)=> s+b.total, 0);
+  document.getElementById('analysisTotalAmount').innerText = rangeTotal.toFixed(2);
+
+  buckets.forEach(b=>{
+    const row = document.createElement('div');
+    row.className = 'achart-row';
+    row.innerHTML = `
+      <div class="achart-label">${b.label}</div>
+      <div class="achart-track"><div class="achart-fill" style="width:${(b.total/maxVal)*100}%"></div></div>
+      <div class="achart-value">$${b.total.toFixed(0)}</div>
+    `;
+    chart.appendChild(row);
+  });
+
+  // category breakdown across whatever date range the buckets above cover
+  let rangeReceipts;
+  if(analysisPeriod==='yearly'){
+    const endYear = new Date().getFullYear(), startYear = endYear-4;
+    rangeReceipts = list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()>=startYear && d.getFullYear()<=endYear; });
+  } else {
+    rangeReceipts = list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===analysisYear; });
+  }
+  const catTotals = {};
+  rangeReceipts.forEach(r=>{
+    const cat = r.category || 'Misc';
+    catTotals[cat] = (catTotals[cat]||0) + (parseFloat(r.amount)||0);
+  });
+  const sortedCats = Object.entries(catTotals).sort((a,b)=> b[1]-a[1]);
+  const catContainer = document.getElementById('analysisCatBreakdown');
+  catContainer.innerHTML = '';
+  if(sortedCats.length===0){
+    catContainer.innerHTML = '<p style="font-size:12.5px; color:var(--ink-soft);">No receipts in this range yet.</p>';
+  } else {
+    sortedCats.forEach(([cat, amt])=>{
+      const row = document.createElement('div');
+      row.className = 'acat-row';
+      row.innerHTML = `
+        <div class="acat-name"><span class="acat-dot" style="background:${categoryColor(cat)}"></span>${escapeHtml(cat)}</div>
+        <div class="acat-amount">$${amt.toFixed(2)}</div>
+      `;
+      catContainer.appendChild(row);
+    });
+  }
+}
+
+document.getElementById('btnOpenAnalysis').onclick = openAnalysisPage;
+document.getElementById('analysisCloseBtn').onclick = closeAnalysisPage;
+
+document.querySelectorAll('.period-tab').forEach(tab=>{
+  tab.addEventListener('click', ()=>{
+    document.querySelectorAll('.period-tab').forEach(t=> t.classList.remove('active'));
+    tab.classList.add('active');
+    analysisPeriod = tab.dataset.period;
+    renderAnalysisPage();
+  });
+});
+
+document.getElementById('analysisYearPrev').onclick = ()=>{ analysisYear--; renderAnalysisPage(); };
+document.getElementById('analysisYearNext').onclick = ()=>{ analysisYear++; renderAnalysisPage(); };
+document.getElementById('analysisFolderSelect').addEventListener('change', (e)=>{
+  analysisFolder = e.target.value;
+  renderAnalysisPage();
+});
+
 function categoryColor(cat){
   const palette = {Meals:'#C48A3F', Fuel:'#4E6B58', Materials:'#7A9482', Software:'#5B7FA6', Travel:'#8C7AA9', Utilities:'#B0503F', Office:'#4E6B58', Tools:'#7A9482', Parking:'#C48A3F', Subscriptions:'#5B7FA6', Health:'#B0503F', Misc:'#5B6B60'};
   return palette[cat] || '#5B6B60';
@@ -1027,11 +1348,43 @@ document.getElementById('monthNavLabel').onclick = ()=>{
   }
 };
 
-// on startup: load whatever was saved from a previous session before the first render,
-// so re-opening the app shows exactly where you left off rather than an empty list
-(async function initApp(){
+// on startup: check for a remembered session (so closing/reopening the app doesn't
+// force re-login every time — logout is what clears this, same as most real apps)
+async function completeLogin(username){
+  currentUser = username;
+  localStorage.setItem('ledger_session_user', username);
   await loadPersistedState();
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('appRoot').style.display = 'block';
   renderAll();
+}
+
+function attemptLogin(){
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errorEl = document.getElementById('loginError');
+  const match = USERS.find(u=> u.username===username && u.password===password);
+  if(!match){
+    errorEl.innerText = 'Incorrect username or password.';
+    errorEl.style.display = 'block';
+    return;
+  }
+  errorEl.style.display = 'none';
+  completeLogin(match.username);
+}
+
+document.getElementById('btnLogin').onclick = attemptLogin;
+document.getElementById('loginPassword').addEventListener('keydown', (e)=>{
+  if(e.key==='Enter') attemptLogin();
+});
+document.getElementById('loginVersionBadge').innerText = 'v' + APP_VERSION;
+
+(async function initApp(){
+  const rememberedUser = localStorage.getItem('ledger_session_user');
+  if(rememberedUser && USERS.some(u=>u.username===rememberedUser)){
+    await completeLogin(rememberedUser);
+  }
+  // otherwise the login screen (visible by default) just waits for input
 })();
 
 /* ============================================================
@@ -1280,14 +1633,14 @@ async function ocrSpaceRecognize(dataUrl, attempt=1){
    ============================================================ */
 function getCategoryUsage(){
   try{
-    return JSON.parse(localStorage.getItem('category_usage') || '{}');
+    return JSON.parse(localStorage.getItem(userKey('category_usage')) || '{}');
   }catch(e){ return {}; }
 }
 function recordCategoryUsage(category){
   if(!category) return;
   const usage = getCategoryUsage();
   usage[category] = (usage[category]||0) + 1;
-  localStorage.setItem('category_usage', JSON.stringify(usage));
+  localStorage.setItem(userKey('category_usage'), JSON.stringify(usage));
 }
 function getCategoriesSortedByUsage(){
   const usage = getCategoryUsage();
@@ -1299,11 +1652,11 @@ function getCategoriesSortedByUsage(){
    ============================================================ */
 function getKnownMerchants(){
   try{
-    return JSON.parse(localStorage.getItem('known_merchants') || '[]');
+    return JSON.parse(localStorage.getItem(userKey('known_merchants')) || '[]');
   }catch(e){ return []; }
 }
 function saveKnownMerchants(list){
-  localStorage.setItem('known_merchants', JSON.stringify(list.slice(0, 200))); // cap list size
+  localStorage.setItem(userKey('known_merchants'), JSON.stringify(list.slice(0, 200))); // cap list size
 }
 // call this whenever a receipt is verified & saved, so the app "learns" the merchant
 function rememberMerchant(establishment, category){
@@ -2062,10 +2415,25 @@ const storageSheet = document.getElementById('storageSheet');
 const storageBackdrop = document.getElementById('storageBackdrop');
 document.getElementById('btnStorageInfo').onclick = ()=>{
   document.getElementById('inputApiKey').value = localStorage.getItem('ocrspace_key') || '';
+  document.getElementById('menuCurrentUser').innerText = currentUser || '';
   renderMerchantList();
   renderCategoryManageList();
   storageBackdrop.classList.add('open');
   storageSheet.classList.add('open');
+};
+
+document.getElementById('btnLogout').onclick = ()=>{
+  if(!confirm('Log out? Your receipts stay saved on this device and will be here next time you log back in.')) return;
+  localStorage.removeItem('ledger_session_user');
+  currentUser = null;
+  receipts = []; customFolders = []; receiptSeq = 1; activeFolderId = 'personal';
+  storageBackdrop.classList.remove('open');
+  storageSheet.classList.remove('open');
+  document.getElementById('appRoot').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('loginUsername').value = '';
+  document.getElementById('loginPassword').value = '';
+  document.getElementById('loginError').style.display = 'none';
 };
 
 // the original built-in set — protected from deletion so existing receipts never
@@ -2104,7 +2472,7 @@ function renderCategoryManageList(){
         // carry over usage count under the new name
         const usageMap = getCategoryUsage();
         if(usageMap[cat]){ usageMap[clean] = (usageMap[clean]||0) + usageMap[cat]; delete usageMap[cat]; }
-        localStorage.setItem('category_usage', JSON.stringify(usageMap));
+        localStorage.setItem(userKey('category_usage'), JSON.stringify(usageMap));
         persistCategories();
         renderAll();
         renderCategoryManageList();
@@ -2122,7 +2490,7 @@ function renderCategoryManageList(){
         if(idx>-1) CATEGORIES.splice(idx,1);
         const usageMap = getCategoryUsage();
         delete usageMap[cat];
-        localStorage.setItem('category_usage', JSON.stringify(usageMap));
+        localStorage.setItem(userKey('category_usage'), JSON.stringify(usageMap));
         persistCategories();
         renderAll();
         renderCategoryManageList();
