@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Ledger — Receipt Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
   :root{
     --paper:#F6F4EE;
@@ -233,6 +238,17 @@
   .acat-dot{ width:8px; height:8px; border-radius:50%; flex:0 0 auto; }
   .acat-amount{ font-family:var(--mono); font-size:13px; font-weight:700; }
 
+  /* ---------- Import preview rows ---------- */
+  .import-row{
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    padding:10px 12px; background:var(--card); border:1px solid var(--rule); border-radius:10px;
+  }
+  .import-row.flagged{ border-color:var(--amber); background:#FCF6EE; }
+  .import-row-info{ min-width:0; flex:1; }
+  .import-row-name{ font-size:13px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .import-row-meta{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+  .import-row-amount{ font-family:var(--mono); font-size:13px; font-weight:700; flex:0 0 auto; }
+
   /* ---------- Camera overlay ---------- */
   .camera-view{
     position:fixed; inset:0; background:#0D120E; z-index:100; display:none;
@@ -386,6 +402,21 @@
   /* ---------- Storage / archive info sheet ---------- */
   .info-sheet .form-body p{font-size:13.5px; line-height:1.6; color:var(--ink-soft);}
   .info-sheet .form-body h4{font-size:13px; margin:16px 0 6px; color:var(--ink);}
+
+  /* ---------- Collapsible menu sections ---------- */
+  .menu-section{ border-bottom:1px solid var(--rule); padding:4px 0; }
+  .menu-section:first-of-type{ border-top:none; }
+  .menu-section summary{
+    font-size:14px; font-weight:700; color:var(--ink); padding:10px 0; cursor:pointer;
+    list-style:none; display:flex; justify-content:space-between; align-items:center;
+  }
+  .menu-section summary::-webkit-details-marker{ display:none; }
+  .menu-section summary::after{ content:'▾'; color:var(--ink-soft); font-size:12px; transition:transform .2s; }
+  .menu-section[open] summary::after{ transform:rotate(180deg); }
+  .menu-section-body{ padding-bottom:14px; }
+  .menu-section-body p{ font-size:13px; line-height:1.5; color:var(--ink-soft); }
+  .menu-section-body h5{ font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft); margin:14px 0 8px; }
+  .menu-section-body h5:first-child{ margin-top:0; }
   .storage-opt{
     display:flex; gap:12px; align-items:flex-start; padding:12px; border:1.5px solid var(--rule);
     border-radius:12px; margin-bottom:10px; background:var(--card);
@@ -710,47 +741,117 @@
       <button class="sheet-close" id="storageCloseBtn">✕</button>
     </div>
     <div class="form-body">
-      <h4 style="margin-top:0;">Account</h4>
-      <p>Logged in as <strong id="menuCurrentUser">admin</strong>. Each account keeps its own separate receipts on this device — remember this is a testing-only gate, not real account security.</p>
-      <button id="btnLogout" style="width:100%; padding:12px; border-radius:11px; border:1.5px solid var(--rule); background:var(--paper-dim); color:var(--ink); font-size:13.5px; font-weight:700; cursor:pointer; margin-bottom:6px;">Log out</button>
+      <details class="menu-section" open>
+        <summary>Account</summary>
+        <div class="menu-section-body">
+          <p>Logged in as <strong id="menuCurrentUser">admin</strong>. Each account keeps its own separate receipts on this device — remember this is a testing-only gate, not real account security.</p>
+          <button id="btnLogout" style="width:100%; padding:12px; border-radius:11px; border:1.5px solid var(--rule); background:var(--paper-dim); color:var(--ink); font-size:13.5px; font-weight:700; cursor:pointer; margin-bottom:6px;">Log out</button>
+          <p>Receipts are saved to this browser's local storage (IndexedDB), so closing the app or restarting your phone won't lose anything. This is device-local, not a cloud account.</p>
+        </div>
+      </details>
 
-      <p>Receipts are saved to this browser's local storage (IndexedDB), so closing the app or restarting your phone won't lose anything — it'll be exactly as you left it next time you open this file. This is device-local, not a cloud account, so it won't sync across phones/browsers on its own.</p>
+      <details class="menu-section" open>
+        <summary>Export &amp; Import</summary>
+        <div class="menu-section-body">
+          <p style="margin-top:0;">Build a report of your receipts, or bring in data from elsewhere.</p>
 
-      <h4>Google Drive archive</h4>
-      <p>A Drive folder is ready to receive your receipts: <strong>Engineer of Things — Receipts</strong>, with Personal / Work / Investments / Other subfolders matching the app.</p>
-      <a href="https://drive.google.com/drive/folders/1F68n8iMC3T1AVHTEU0rUDs8Q_7fpfJsN" target="_blank" style="display:block; text-align:center; padding:12px; border-radius:12px; background:var(--sage-deep); color:#fff; text-decoration:none; font-size:13.5px; font-weight:700; margin:10px 0;">Open Drive folder ↗</a>
-      <p style="margin-top:-4px;">This static file can't upload to Drive directly from your phone (no backend to hold the sign-in), so for now: tap <strong>Export receipts</strong> below, then share the downloaded file to the Drive app's folder above. A direct in-app upload would need a small backend — let me know if you want that built next.</p>
-      <button id="btnExportReceipts" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid var(--sage); background:var(--sage-pale); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer; margin-top:4px;">Export data only (fast, small file)</button>
-      <button id="btnExportReceiptsWithImages" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid var(--sage); background:var(--card); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer; margin-top:8px;">Export with photos (compressed)</button>
-      <p style="margin-top:8px; font-size:11px;">"Data only" is a few KB — dates, amounts, categories, notes — great for spreadsheets. "With photos" compresses each image before export so the file stays a reasonable size instead of ballooning with full-resolution camera photos.</p>
+          <h5>Export</h5>
+          <div class="field">
+            <label>Format</label>
+            <select id="exportFormatSelect" style="width:100%; padding:10px 12px; border-radius:10px; border:1.5px solid var(--rule); font-size:14px; background:var(--card); color:var(--ink);">
+              <option value="xlsx">Excel (.xlsx)</option>
+              <option value="pdf">PDF report</option>
+              <option value="json">JSON (data only)</option>
+            </select>
+          </div>
+          <label style="display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-soft); margin:8px 0 12px; font-weight:600;">
+            <input type="checkbox" id="exportIncludePhotos" style="width:16px; height:16px;">
+            Include photos (bundles a .zip with the report + a media folder, linked by filename)
+          </label>
+          <button id="btnRunExport" style="width:100%; padding:13px; border-radius:12px; border:none; background:var(--sage-deep); color:#fff; font-size:13.5px; font-weight:700; cursor:pointer;">Export</button>
 
-      <h4>What gets archived per receipt</h4>
-      <p>Original image(s), extracted fields, your verified/edited values, timestamp of verification, and folder/category — so every entry is fully auditable later.</p>
+          <h5>Import</h5>
+          <p>Bring receipts in from a spreadsheet (reliable) or a PDF report (best-effort — every imported row will need verification, same as a scanned receipt).</p>
+          <div style="display:flex; gap:8px;">
+            <button id="btnImportXlsx" style="flex:1; padding:12px; border-radius:11px; border:1.5px solid var(--sage); background:var(--card); color:var(--sage-deep); font-size:13px; font-weight:700; cursor:pointer;">Import .xlsx</button>
+            <button id="btnImportPdf" style="flex:1; padding:12px; border-radius:11px; border:1.5px solid var(--rule); background:var(--card); color:var(--ink-soft); font-size:13px; font-weight:700; cursor:pointer;">Import .pdf</button>
+          </div>
+          <input type="file" id="fileInputImportXlsx" accept=".xlsx,.xls" style="display:none;">
+          <input type="file" id="fileInputImportPdf" accept=".pdf" style="display:none;">
+        </div>
+      </details>
 
-      <h4>OCR engine (text extraction)</h4>
-      <p>This prototype uses <strong>OCR.space</strong> — a real, free OCR API (25,000 requests/month free tier). It's currently running on the shared public demo key, which is rate-limited and shared with other developers testing the same API, so you may occasionally see a "rate limit" error if a lot of people are testing it at once.</p>
-      <div class="field" style="margin-top:10px;">
-        <label>API key</label>
-        <input type="text" id="inputApiKey" placeholder="helloworld (demo key)">
-      </div>
-      <p style="margin-top:-6px;">Get your own free key in 30 seconds at <strong>ocr.space/ocrapi</strong> (no credit card) and paste it above — it's saved in this browser only and unlocks much higher limits.</p>
+      <details class="menu-section">
+        <summary>Google Drive archive</summary>
+        <div class="menu-section-body">
+          <p style="margin-top:0;">A Drive folder is ready to receive your receipts: <strong>Engineer of Things — Receipts</strong>, with Personal / Work / Investments / Other subfolders matching the app.</p>
+          <a href="https://drive.google.com/drive/folders/1F68n8iMC3T1AVHTEU0rUDs8Q_7fpfJsN" target="_blank" style="display:block; text-align:center; padding:12px; border-radius:12px; background:var(--sage-deep); color:#fff; text-decoration:none; font-size:13.5px; font-weight:700; margin:10px 0;">Open Drive folder ↗</a>
+          <p style="margin-top:-4px;">This static file can't upload to Drive directly from your phone (no backend to hold the sign-in), so for now: export a report or zip above, then share the download to the Drive app's folder above.</p>
+        </div>
+      </details>
 
-      <h4>Known merchants</h4>
-      <p>Every time you verify a receipt, the app remembers the establishment name and category. Next time that merchant's name appears anywhere in the scanned text — even on a messy or oddly-formatted receipt — it's matched instantly instead of guessed.</p>
-      <div id="merchantList" style="margin-top:10px;"></div>
+      <details class="menu-section">
+        <summary>OCR engine (text extraction)</summary>
+        <div class="menu-section-body">
+          <p style="margin-top:0;">This prototype uses <strong>OCR.space</strong> — a real, free OCR API (25,000 requests/month free tier). It's currently running on the shared public demo key, which is rate-limited and shared with other developers testing the same API.</p>
+          <div class="field" style="margin-top:10px;">
+            <label>API key</label>
+            <input type="text" id="inputApiKey" placeholder="helloworld (demo key)">
+          </div>
+          <p style="margin-top:-6px;">Get your own free key in 30 seconds at <strong>ocr.space/ocrapi</strong> (no credit card) and paste it above.</p>
+        </div>
+      </details>
 
-      <h4>Categories</h4>
-      <p>Manage your category list here anytime — this is separate from the quick "+ Add new category" shortcut available while verifying a receipt, which is handy for adding one on the fly mid-scan.</p>
-      <div id="categoryManageList" style="margin-top:10px;"></div>
-      <button id="btnMenuAddCategory" style="width:100%; padding:12px; border-radius:11px; border:1.5px dashed var(--sage); background:var(--card); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer; margin-top:6px;">+ Add new category</button>
+      <details class="menu-section">
+        <summary>Known merchants</summary>
+        <div class="menu-section-body">
+          <p style="margin-top:0;">Every time you verify a receipt, the app remembers the establishment name and category. Next time that merchant's name appears anywhere in the scanned text, it's matched instantly instead of guessed.</p>
+          <div id="merchantList" style="margin-top:10px;"></div>
+        </div>
+      </details>
 
-      <h4>Reset data</h4>
-      <p>This clears every receipt saved on this device. Export first if you want a backup — this cannot be undone.</p>
-      <button id="btnClearAllData" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid #D9A896; background:#FBEEE9; color:#8A3A2C; font-size:13.5px; font-weight:700; cursor:pointer; margin-top:6px;">Clear all receipts &amp; start fresh</button>
+      <details class="menu-section">
+        <summary>Categories</summary>
+        <div class="menu-section-body">
+          <p style="margin-top:0;">Manage your category list here anytime — separate from the quick "+ Add new category" shortcut available while verifying a receipt.</p>
+          <div id="categoryManageList" style="margin-top:10px;"></div>
+          <button id="btnMenuAddCategory" style="width:100%; padding:12px; border-radius:11px; border:1.5px dashed var(--sage); background:var(--card); color:var(--sage-deep); font-size:13.5px; font-weight:700; cursor:pointer; margin-top:6px;">+ Add new category</button>
+        </div>
+      </details>
+
+      <details class="menu-section">
+        <summary>Reset data</summary>
+        <div class="menu-section-body">
+          <p style="margin-top:0;">This clears every receipt saved on this device. Export first if you want a backup — this cannot be undone.</p>
+          <button id="btnClearAllData" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid #D9A896; background:#FBEEE9; color:#8A3A2C; font-size:13.5px; font-weight:700; cursor:pointer; margin-top:6px;">Clear all receipts &amp; start fresh</button>
+        </div>
+      </details>
     </div>
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- IMPORT PREVIEW -->
+  <div class="sheet-backdrop" id="importBackdrop"></div>
+  <div class="sheet" id="importSheet" style="max-height:88vh;">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2 id="importSheetTitle">Import preview</h2>
+      <button class="sheet-close" id="importCloseBtn">✕</button>
+    </div>
+    <div class="form-body">
+      <p id="importSummary" style="margin-top:0; font-size:13px; color:var(--ink-soft);"></p>
+      <div class="field">
+        <label>Import into folder</label>
+        <select id="importFolderSelect" style="width:100%; padding:10px 12px; border-radius:10px; border:1.5px solid var(--rule); font-size:14px; background:var(--card); color:var(--ink);"></select>
+      </div>
+      <div id="importRowsPreview" style="display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow-y:auto; margin-top:10px;"></div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn delete" id="btnImportCancel">Cancel</button>
+      <button class="btn confirm" id="btnImportConfirm">Import all</button>
+    </div>
+  </div>
 
   <!-- SEARCH / FILTER PANEL -->
   <div class="sheet-backdrop" id="searchBackdrop"></div>
@@ -827,7 +928,12 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.5.0'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
+const APP_VERSION = '1.6.0'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
+
+// configure pdf.js worker (needed for PDF import/text-extraction)
+if(window['pdfjsLib']){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
 const CATEGORIES = ['Meals','Groceries','Fuel','Materials','Software','Travel','Utilities','Rent','Office','Tools','Parking','Subscriptions','Health','Misc'];
 
 // ⚠️ TESTING-ONLY USER GATE — NOT REAL SECURITY.
@@ -2603,56 +2709,436 @@ function downloadJson(exportData, filenamePrefix){
   URL.revokeObjectURL(url);
 }
 
-document.getElementById('btnExportReceipts').onclick = ()=>{
-  if(receipts.length===0){
-    showToast('No receipts to export yet');
-    return;
-  }
-  const exportData = {
-    exportedAt: new Date().toISOString(),
-    note: 'Data-only export — no photos included. Use "Export with photos" for a version that includes images.',
-    receipts: buildExportRows(false)
-  };
-  downloadJson(exportData, 'receipts-data');
-  showToast(`Exported ${receipts.length} receipt${receipts.length===1?'':'s'} (data only)`);
-};
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
-document.getElementById('btnExportReceiptsWithImages').onclick = async ()=>{
-  if(receipts.length===0){
-    showToast('No receipts to export yet');
-    return;
-  }
-  const totalImages = receipts.reduce((sum,r)=> sum + (r.images||[]).length, 0);
-  showToast(`Compressing ${totalImages} photo${totalImages===1?'':'s'}…`);
+/* ============================================================
+   REPORT EXPORT (XLSX / PDF / JSON, with optional photo bundling)
+   ============================================================ */
 
-  const rows = [];
-  for(const r of receipts){
-    const compressedImages = [];
+// sorted by folder then date, matching Crunchr's per-folder grouped report style
+function buildReportRows(){
+  return [...receipts].sort((a,b)=>{
+    const fa = getFolderLabelFor(a.folderId), fb = getFolderLabelFor(b.folderId);
+    if(fa !== fb) return fa.localeCompare(fb);
+    return (a.date||'').localeCompare(b.date||'');
+  });
+}
+function getFolderLabelFor(folderId){
+  return (allFolders().find(f=>f.id===folderId)||{}).label || folderId;
+}
+function formatDateForReport(d){
+  if(!d) return '';
+  const dt = new Date(d+'T00:00:00');
+  return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
+}
+
+// Builds the media folder contents (compressed images, sequentially named) for a set
+// of receipts, and returns a map from receipt id -> array of filenames used, so the
+// report (XLSX/PDF) can reference the exact same names.
+async function buildMediaFolder(zip, rows){
+  const mediaFolder = zip.folder('media');
+  const filenameMap = {};
+  let counter = 1;
+  for(const r of rows){
+    const names = [];
     for(const img of (r.images||[])){
-      compressedImages.push(await compressImage(img));
+      const filename = `receipt_${String(counter).padStart(4,'0')}.jpg`;
+      counter++;
+      const compressed = await compressImage(img, 1000, 0.6);
+      const base64Data = compressed.split(',')[1];
+      mediaFolder.file(filename, base64Data, {base64:true});
+      names.push(filename);
     }
-    rows.push({
-      folder: (allFolders().find(f=>f.id===r.folderId)||{}).label || r.folderId,
-      date: r.date,
-      establishment: r.establishment,
-      amount: r.amount,
-      currency: r.currency,
-      gst: r.gst || null,
-      category: r.category,
-      notes: r.notes,
-      verified: r.verified,
-      images: compressedImages
+    filenameMap[r.id] = names;
+  }
+  return filenameMap;
+}
+
+function buildXlsxWorkbook(rows, filenameMap){
+  const wb = XLSX.utils.book_new();
+  const sheetData = [];
+  const merges = [];
+  const hyperlinks = {}; // cellRef -> {Target}
+
+  let currentFolder = null;
+  rows.forEach(r=>{
+    const folderLabel = getFolderLabelFor(r.folderId);
+    if(folderLabel !== currentFolder){
+      currentFolder = folderLabel;
+      const headerRowIdx = sheetData.length;
+      sheetData.push([`Folder: ${folderLabel}`]);
+      merges.push({ s:{r:headerRowIdx,c:0}, e:{r:headerRowIdx,c:6} });
+      sheetData.push(['Date','Description','Amount','Currency','Category','Image','Notes']);
+    }
+    const rowIdx = sheetData.length;
+    const names = filenameMap ? (filenameMap[r.id]||[]) : [];
+    const imageCell = names.length ? names.join(', ') : (r.images&&r.images.length ? `${r.images.length} photo(s)` : '-');
+    sheetData.push([
+      formatDateForReport(r.date),
+      r.establishment || '',
+      parseFloat(r.amount)||0,
+      r.currency || 'AUD',
+      r.category || 'Misc',
+      imageCell,
+      r.notes || '-'
+    ]);
+    if(filenameMap && names.length){
+      const colLetter = 'F';
+      hyperlinks[`${colLetter}${rowIdx+1}`] = { Target: `media/${names[0]}` };
+    }
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(sheetData);
+  ws['!merges'] = merges;
+  ws['!cols'] = [{wch:11},{wch:26},{wch:10},{wch:9},{wch:14},{wch:22},{wch:20}];
+  Object.entries(hyperlinks).forEach(([ref, link])=>{
+    if(ws[ref]) ws[ref].l = link;
+  });
+  XLSX.utils.book_append_sheet(wb, ws, 'Receipts');
+  return wb;
+}
+
+function buildPdfReport(rows, filenameMap){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  let currentFolder = null;
+  let body = [];
+  const sections = []; // {folderLabel, body, linkTargets: [{rowIndex, target}]}
+
+  rows.forEach(r=>{
+    const folderLabel = getFolderLabelFor(r.folderId);
+    if(folderLabel !== currentFolder){
+      if(body.length) sections.push({ folderLabel: currentFolder, body });
+      currentFolder = folderLabel;
+      body = [];
+    }
+    const names = filenameMap ? (filenameMap[r.id]||[]) : [];
+    const imageLabel = names.length ? names.join(', ') : (r.images&&r.images.length ? `${r.images.length} photo(s)` : '-');
+    body.push([
+      formatDateForReport(r.date), r.establishment||'', (parseFloat(r.amount)||0).toFixed(2),
+      r.currency||'AUD', r.category||'Misc', imageLabel, r.notes||'-'
+    ]);
+  });
+  if(body.length) sections.push({ folderLabel: currentFolder, body });
+
+  let firstSection = true;
+  sections.forEach(section=>{
+    if(!firstSection) doc.addPage();
+    firstSection = false;
+    doc.setFontSize(13);
+    doc.setFont(undefined,'bold');
+    doc.text(`Folder: ${section.folderLabel}`, 40, 40);
+    doc.autoTable({
+      startY: 54,
+      head: [['Date','Description','Amount','Currency','Category','Image','Notes']],
+      body: section.body,
+      styles: { fontSize:8, cellPadding:5 },
+      headStyles: { fillColor:[122,148,130], textColor:255, fontStyle:'bold' },
+      columnStyles: { 2:{halign:'right'} },
+      margin:{ left:40, right:40 },
     });
+  });
+
+  return doc;
+}
+
+async function runExport(){
+  const format = document.getElementById('exportFormatSelect').value; // xlsx | pdf | json
+  const includePhotos = document.getElementById('exportIncludePhotos').checked;
+
+  if(receipts.length===0){
+    showToast('No receipts to export yet');
+    return;
   }
 
-  const exportData = {
-    exportedAt: new Date().toISOString(),
-    note: 'Photos compressed to max 1000px / JPEG quality 0.6 to keep file size manageable.',
-    receipts: rows
-  };
-  downloadJson(exportData, 'receipts-with-photos');
-  showToast(`Exported ${receipts.length} receipt${receipts.length===1?'':'s'} with compressed photos`);
+  const rows = buildReportRows();
+  const stamp = new Date().toISOString().slice(0,10);
+
+  if(format==='json'){
+    if(includePhotos){
+      showToast('Compressing photos…');
+      const withImages = [];
+      for(const r of rows){
+        const compressedImages = [];
+        for(const img of (r.images||[])) compressedImages.push(await compressImage(img));
+        withImages.push({ folder:getFolderLabelFor(r.folderId), date:r.date, establishment:r.establishment, amount:r.amount, currency:r.currency, gst:r.gst||null, category:r.category, notes:r.notes, images:compressedImages });
+      }
+      downloadJson({ exportedAt:new Date().toISOString(), receipts:withImages }, 'receipts-with-photos');
+    } else {
+      downloadJson({ exportedAt:new Date().toISOString(), receipts:buildExportRows(false) }, 'receipts-data');
+    }
+    showToast(`Exported ${rows.length} receipt${rows.length===1?'':'s'}`);
+    return;
+  }
+
+  if(!includePhotos){
+    // lightweight report only — no zip needed
+    if(format==='xlsx'){
+      const wb = buildXlsxWorkbook(rows, null);
+      XLSX.writeFile(wb, `receipts-report-${stamp}.xlsx`);
+    } else if(format==='pdf'){
+      const doc = buildPdfReport(rows, null);
+      doc.save(`receipts-report-${stamp}.pdf`);
+    }
+    showToast(`Exported ${rows.length} receipt${rows.length===1?'':'s'}`);
+    return;
+  }
+
+  // report + photos, bundled into one zip — mirrors Crunchr's report+media folder approach
+  showToast('Building report and compressing photos…');
+  const zip = new JSZip();
+  const filenameMap = await buildMediaFolder(zip, rows);
+
+  if(format==='xlsx'){
+    const wb = buildXlsxWorkbook(rows, filenameMap);
+    const xlsxData = XLSX.write(wb, {type:'array', bookType:'xlsx'});
+    zip.file(`report-${stamp}.xlsx`, xlsxData);
+  } else if(format==='pdf'){
+    const doc = buildPdfReport(rows, filenameMap);
+    const pdfBlob = doc.output('blob');
+    zip.file(`report-${stamp}.pdf`, pdfBlob);
+  }
+
+  const zipBlob = await zip.generateAsync({type:'blob'});
+  downloadBlob(zipBlob, `receipts-export-${stamp}.zip`);
+  showToast(`Exported ${rows.length} receipt${rows.length===1?'':'s'} with photos`);
+}
+
+document.getElementById('btnRunExport').onclick = ()=>{ runExport().catch(err=>{ console.error(err); showToast('Export failed — see console for details'); }); };
+
+/* ============================================================
+   IMPORT — XLSX (reliable) and PDF (best-effort)
+   ============================================================ */
+let pendingImportRows = []; // parsed rows awaiting confirmation, each: {date, establishment, amount, currency, category, notes, needsCheck}
+
+const COLUMN_ALIASES = {
+  date: ['date','transaction date','purchase date'],
+  establishment: ['description','establishment','merchant','vendor','store','payee','name'],
+  amount: ['amount','total','price','cost'],
+  currency: ['currency','curr'],
+  category: ['category','cat','type'],
+  notes: ['notes','note','memo','comment'],
 };
+
+function detectColumnIndex(headers, aliases){
+  const lower = headers.map(h=> (h||'').toString().trim().toLowerCase());
+  for(const alias of aliases){
+    const idx = lower.indexOf(alias);
+    if(idx>-1) return idx;
+  }
+  for(let i=0;i<lower.length;i++){
+    if(aliases.some(a=> lower[i].includes(a))) return i;
+  }
+  return -1;
+}
+
+// handles both plain date strings (DD/MM/YYYY etc, reusing similar logic to the OCR
+// date parser) and Excel serial date numbers (when the source file used real date cells)
+function parseFlexibleDate(value){
+  if(value==null || value==='') return '';
+  if(typeof value==='number'){
+    // Excel serial date (days since 1899-12-30)
+    const parsed = XLSX.SSF && XLSX.SSF.parse_date_code ? XLSX.SSF.parse_date_code(value) : null;
+    if(parsed) return `${parsed.y}-${String(parsed.m).padStart(2,'0')}-${String(parsed.d).padStart(2,'0')}`;
+    return '';
+  }
+  const str = value.toString().trim();
+  let m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = str.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+  if(m){
+    let [,a,b,y] = m;
+    if(y.length===2) y = '20'+y;
+    let dd = a.padStart(2,'0'), mm = b.padStart(2,'0');
+    if(parseInt(dd,10)>31 || parseInt(mm,10)>12){ [dd,mm]=[mm,dd]; }
+    return `${y}-${mm}-${dd}`;
+  }
+  return '';
+}
+
+function parseXlsxFile(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = (e)=>{
+      try{
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, {type:'array', cellDates:false});
+        const firstSheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(firstSheet, {header:1, defval:''});
+        resolve(rows);
+      }catch(err){ reject(err); }
+    };
+    reader.onerror = ()=> reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+// shared by both XLSX rows and PDF-extracted table-like text — takes an array of
+// header-labelled row objects and turns them into pending import receipts
+function rowsToImportEntries(headerRow, dataRows){
+  const idx = {
+    date: detectColumnIndex(headerRow, COLUMN_ALIASES.date),
+    establishment: detectColumnIndex(headerRow, COLUMN_ALIASES.establishment),
+    amount: detectColumnIndex(headerRow, COLUMN_ALIASES.amount),
+    currency: detectColumnIndex(headerRow, COLUMN_ALIASES.currency),
+    category: detectColumnIndex(headerRow, COLUMN_ALIASES.category),
+    notes: detectColumnIndex(headerRow, COLUMN_ALIASES.notes),
+  };
+
+  const entries = [];
+  dataRows.forEach(row=>{
+    if(!row || row.every(c=> c==='' || c==null)) return; // skip blank rows
+    // skip section-header rows like "Folder: Personal" (a single populated cell)
+    const populated = row.filter(c=> c!=='' && c!=null);
+    if(populated.length<=1 && /folder\s*:/i.test(String(populated[0]||''))) return;
+    // skip a repeated header row appearing again mid-file
+    if(idx.date>-1 && String(row[idx.date]).toLowerCase().trim()===COLUMN_ALIASES.date[0]) return;
+
+    const date = idx.date>-1 ? parseFlexibleDate(row[idx.date]) : '';
+    const establishment = idx.establishment>-1 ? String(row[idx.establishment]||'').trim() : '';
+    const rawAmount = idx.amount>-1 ? row[idx.amount] : '';
+    const amount = rawAmount!=='' && rawAmount!=null ? Math.abs(parseFloat(rawAmount)||0).toFixed(2) : '';
+    const currency = idx.currency>-1 && row[idx.currency] ? String(row[idx.currency]).trim().toUpperCase() : 'AUD';
+    const category = idx.category>-1 && row[idx.category] ? String(row[idx.category]).trim() : 'Misc';
+    const notes = idx.notes>-1 ? String(row[idx.notes]||'').replace(/^-$/,'').trim() : '';
+
+    if(!establishment && !amount) return; // not a usable row
+
+    const needsCheck = !date || !establishment || !amount;
+    entries.push({ date, establishment, amount, currency, category, notes, needsCheck });
+  });
+  return entries;
+}
+
+function openImportPreview(entries, sourceLabel){
+  pendingImportRows = entries;
+  document.getElementById('importSheetTitle').innerText = `Import preview — ${sourceLabel}`;
+  document.getElementById('importSummary').innerText = entries.length
+    ? `${entries.length} row${entries.length===1?'':'s'} found. Rows in amber are missing a field and will need a quick check after import — same as a scanned receipt.`
+    : `No usable rows were found in this file.`;
+
+  const folderSelect = document.getElementById('importFolderSelect');
+  folderSelect.innerHTML = '';
+  allFolders().forEach(f=>{
+    const opt = document.createElement('option');
+    opt.value = f.id; opt.innerText = f.label;
+    if(f.id===activeFolderId) opt.selected = true;
+    folderSelect.appendChild(opt);
+  });
+
+  const preview = document.getElementById('importRowsPreview');
+  preview.innerHTML = '';
+  entries.forEach((r,i)=>{
+    const row = document.createElement('div');
+    row.className = 'import-row' + (r.needsCheck ? ' flagged':'');
+    row.innerHTML = `
+      <div class="import-row-info">
+        <div class="import-row-name">${escapeHtml(r.establishment || '(no name)')}</div>
+        <div class="import-row-meta">${r.date || 'no date'} · ${escapeHtml(r.category)}</div>
+      </div>
+      <div class="import-row-amount">${r.currency} ${r.amount || '0.00'}</div>
+    `;
+    preview.appendChild(row);
+  });
+
+  document.getElementById('btnImportConfirm').disabled = entries.length===0;
+  document.getElementById('importBackdrop').classList.add('open');
+  document.getElementById('importSheet').classList.add('open');
+}
+function closeImportPreview(){
+  document.getElementById('importBackdrop').classList.remove('open');
+  document.getElementById('importSheet').classList.remove('open');
+}
+
+document.getElementById('importCloseBtn').onclick = closeImportPreview;
+document.getElementById('btnImportCancel').onclick = closeImportPreview;
+document.getElementById('importBackdrop').onclick = closeImportPreview;
+
+document.getElementById('btnImportConfirm').onclick = ()=>{
+  const targetFolder = document.getElementById('importFolderSelect').value;
+  pendingImportRows.forEach(r=>{
+    receipts.push({
+      id: receiptSeq++, folderId: targetFolder, date: r.date || new Date().toISOString().slice(0,10),
+      establishment: r.establishment, amount: r.amount || '0.00', currency: r.currency,
+      category: CATEGORIES.includes(r.category) ? r.category : 'Misc',
+      notes: r.notes, images: [], verified: !r.needsCheck, needsCheck: r.needsCheck,
+    });
+    if(!CATEGORIES.includes(r.category) && r.category){ CATEGORIES.push(r.category); persistCategories(); }
+  });
+  const count = pendingImportRows.length;
+  pendingImportRows = [];
+  closeImportPreview();
+  renderAll();
+  showToast(`Imported ${count} receipt${count===1?'':'s'}`);
+};
+
+document.getElementById('btnImportXlsx').onclick = ()=> document.getElementById('fileInputImportXlsx').click();
+document.getElementById('fileInputImportXlsx').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  try{
+    const rows = await parseXlsxFile(file);
+    // find the first row that looks like a real header (contains a recognisable column name)
+    let headerRowIdx = rows.findIndex(row=>
+      detectColumnIndex(row, COLUMN_ALIASES.date)>-1 || detectColumnIndex(row, COLUMN_ALIASES.amount)>-1
+    );
+    if(headerRowIdx===-1) headerRowIdx = 0;
+    const headerRow = rows[headerRowIdx];
+    const dataRows = rows.slice(headerRowIdx+1);
+    const entries = rowsToImportEntries(headerRow, dataRows);
+    openImportPreview(entries, file.name);
+  }catch(err){
+    console.error(err);
+    showToast('Could not read that spreadsheet — check it\'s a valid .xlsx file');
+  }
+});
+
+document.getElementById('btnImportPdf').onclick = ()=> document.getElementById('fileInputImportPdf').click();
+document.getElementById('fileInputImportPdf').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  showToast('Reading PDF text…');
+  try{
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+    let fullText = '';
+    for(let i=1;i<=pdf.numPages;i++){
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map(item=>item.str).join(' ');
+      fullText += '\n' + pageText;
+    }
+    // best-effort: PDFs don't preserve a clean row/column grid the way a spreadsheet
+    // does, so this looks for header-like keywords, then treats each following line as
+    // one row split on big whitespace gaps or multiple-space runs — the same forgiving
+    // approach used for OCR'd receipt text, just applied per-line across the whole doc
+    const lines = fullText.split('\n').map(l=>l.trim()).filter(Boolean);
+    const headerLineIdx = lines.findIndex(l=> /date/i.test(l) && /(amount|total)/i.test(l));
+    if(headerLineIdx===-1){
+      showToast('Could not find a recognisable table in this PDF — try XLSX import instead');
+      return;
+    }
+    const headerRow = lines[headerLineIdx].split(/\s{2,}/);
+    const dataLines = lines.slice(headerLineIdx+1).map(l=> l.split(/\s{2,}/));
+    const entries = rowsToImportEntries(headerRow, dataLines);
+    openImportPreview(entries, file.name + ' (best-effort — please double check every row)');
+  }catch(err){
+    console.error(err);
+    showToast('Could not read that PDF — try XLSX import instead');
+  }
+});
+
 
 document.getElementById('btnClearAllData').onclick = ()=>{
   const count = receipts.length;
