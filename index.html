@@ -497,6 +497,7 @@
       <div>
         <div class="brand-mark">Engineer of Things · Ledger <span id="versionBadge" style="opacity:0.6; font-weight:400;">v1.0</span></div>
         <h1>Receipts</h1>
+        <div id="currentUserIndicator" style="font-size:11px; color:var(--ink-soft); margin-top:2px; font-family:var(--mono);">👤 admin</div>
       </div>
       <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
         <div class="folder-chip" id="activeFolderChip">📁 Personal</div>
@@ -930,7 +931,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.7.0'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
+const APP_VERSION = '1.7.1'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
@@ -1071,6 +1072,24 @@ async function migrateLegacyDataToAdmin(){
     }
   }catch(err){
     console.error('Legacy data migration failed', err);
+  }
+
+  // separate migration, added after the fact: known merchants and category usage
+  // used to live under un-namespaced localStorage keys before per-user separation
+  // existed. This never got carried over when that separation was added, so it's
+  // handled here on its own flag (independent of the receipts migration above,
+  // which may have already completed and shouldn't block this one from running).
+  try{
+    const alreadyMigratedMerchants = localStorage.getItem('admin:merchants_migrated');
+    if(!alreadyMigratedMerchants){
+      const legacyMerchants = localStorage.getItem('known_merchants');
+      const legacyCategoryUsage = localStorage.getItem('category_usage');
+      if(legacyMerchants) localStorage.setItem('admin:known_merchants', legacyMerchants);
+      if(legacyCategoryUsage) localStorage.setItem('admin:category_usage', legacyCategoryUsage);
+      localStorage.setItem('admin:merchants_migrated', 'true');
+    }
+  }catch(err){
+    console.error('Legacy merchant data migration failed', err);
   }
 }
 
@@ -1464,6 +1483,7 @@ async function completeLogin(username){
   await loadPersistedState();
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appRoot').style.display = 'block';
+  document.getElementById('currentUserIndicator').innerText = `👤 ${username}`;
   renderAll();
 }
 
