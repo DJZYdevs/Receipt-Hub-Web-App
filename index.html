@@ -249,6 +249,20 @@
   .import-row-meta{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
   .import-row-amount{ font-family:var(--mono); font-size:13px; font-weight:700; flex:0 0 auto; }
 
+  /* ---------- Category mapping rows (import) ---------- */
+  .catmap-row{ padding:12px; background:var(--card); border:1px solid var(--rule); border-radius:12px; }
+  .catmap-name{ font-size:14px; font-weight:700; color:var(--ink); margin-bottom:8px; }
+  .catmap-choice{ display:flex; gap:8px; margin-bottom:8px; }
+  .catmap-choice button{
+    flex:1; padding:8px; border-radius:9px; border:1.5px solid var(--rule); background:var(--paper-dim);
+    color:var(--ink-soft); font-size:12px; font-weight:700; cursor:pointer;
+  }
+  .catmap-choice button.active{ background:var(--sage-deep); color:#fff; border-color:var(--sage-deep); }
+  .catmap-existing-select{
+    width:100%; padding:9px 10px; border-radius:9px; border:1.5px solid var(--rule);
+    font-size:13px; background:var(--card); color:var(--ink); display:none;
+  }
+
   /* ---------- Camera overlay ---------- */
   .camera-view{
     position:fixed; inset:0; background:#0D120E; z-index:100; display:none;
@@ -834,6 +848,24 @@
 
   <div class="toast" id="toast"></div>
 
+  <!-- IMPORT CATEGORY MAPPING -->
+  <div class="sheet-backdrop" id="catMapBackdrop"></div>
+  <div class="sheet" id="catMapSheet" style="max-height:88vh;">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2>New categories found</h2>
+      <button class="sheet-close" id="catMapCloseBtn">✕</button>
+    </div>
+    <div class="form-body">
+      <p style="margin-top:0; font-size:13px; color:var(--ink-soft);">This file uses some categories that aren't in your list yet. For each one, add it as a new category or map it to an existing one.</p>
+      <div id="catMapRows" style="display:flex; flex-direction:column; gap:14px;"></div>
+    </div>
+    <div class="sheet-actions">
+      <button class="btn delete" id="btnCatMapCancel">Cancel import</button>
+      <button class="btn confirm" id="btnCatMapContinue">Continue</button>
+    </div>
+  </div>
+
   <!-- IMPORT PREVIEW -->
   <div class="sheet-backdrop" id="importBackdrop"></div>
   <div class="sheet" id="importSheet" style="max-height:88vh;">
@@ -845,7 +877,7 @@
     <div class="form-body">
       <p id="importSummary" style="margin-top:0; font-size:13px; color:var(--ink-soft);"></p>
       <div class="field">
-        <label>Import into folder</label>
+        <label>Default folder <span style="font-weight:400; text-transform:none; letter-spacing:0;">(used for rows without a recognised folder)</span></label>
         <select id="importFolderSelect" style="width:100%; padding:10px 12px; border-radius:10px; border:1.5px solid var(--rule); font-size:14px; background:var(--card); color:var(--ink);"></select>
       </div>
       <div id="importRowsPreview" style="display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow-y:auto; margin-top:10px;"></div>
@@ -931,7 +963,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.7.1'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
+const APP_VERSION = '1.8.0'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
@@ -2964,11 +2996,16 @@ let pendingImportRows = []; // parsed rows awaiting confirmation, each: {date, e
 const COLUMN_ALIASES = {
   date: ['date','transaction date','purchase date'],
   establishment: ['description','establishment','merchant','vendor','store','payee','name'],
-  amount: ['amount','total','price','cost'],
+  // "aud amount" listed first so it wins the exact-match pass over a generic "amount" —
+  // some exports (e.g. Crunchr) have both a "Recorded amount" (original currency) and an
+  // "AUD Amount" (converted) column; the converted one is what a single-currency app wants
+  amount: ['aud amount','amount','total','price','cost'],
   currency: ['currency','curr'],
   category: ['category','cat','type'],
   notes: ['notes','note','memo','comment'],
   image: ['image','photo','receipt','file','attachment'],
+  gst: ['aud gst','gst','tax','recorded tax'],
+  folder: ['folder','account','workspace'],
 };
 
 function detectColumnIndex(headers, aliases){
@@ -3039,6 +3076,8 @@ function rowsToImportEntries(headerRow, dataRows, mediaMap){
     category: detectColumnIndex(headerRow, COLUMN_ALIASES.category),
     notes: detectColumnIndex(headerRow, COLUMN_ALIASES.notes),
     image: detectColumnIndex(headerRow, COLUMN_ALIASES.image),
+    gst: detectColumnIndex(headerRow, COLUMN_ALIASES.gst),
+    folder: detectColumnIndex(headerRow, COLUMN_ALIASES.folder),
   };
 
   const entries = [];
@@ -3057,6 +3096,8 @@ function rowsToImportEntries(headerRow, dataRows, mediaMap){
     const currency = idx.currency>-1 && row[idx.currency] ? String(row[idx.currency]).trim().toUpperCase() : 'AUD';
     const category = idx.category>-1 && row[idx.category] ? String(row[idx.category]).trim() : 'Misc';
     const notes = idx.notes>-1 ? String(row[idx.notes]||'').replace(/^-$/,'').trim() : '';
+    const rawGst = idx.gst>-1 ? row[idx.gst] : '';
+    const gst = rawGst!=='' && rawGst!=null ? Math.abs(parseFloat(rawGst)||0).toFixed(2) : '';
 
     if(!establishment && !amount) return; // not a usable row
 
@@ -3070,11 +3111,104 @@ function rowsToImportEntries(headerRow, dataRows, mediaMap){
       }
     }
 
+    // try to auto-match this row's folder name (e.g. "Personal") against an existing
+    // app folder by label, so imports land in the right place without manual sorting
+    let matchedFolderId = null;
+    if(idx.folder>-1 && row[idx.folder]){
+      const folderName = String(row[idx.folder]).trim().toLowerCase();
+      const match = allFolders().find(f=> f.label.toLowerCase()===folderName);
+      if(match) matchedFolderId = match.id;
+    }
+
     const needsCheck = !date || !establishment || !amount;
-    entries.push({ date, establishment, amount, currency, category, notes, needsCheck, images });
+    entries.push({ date, establishment, amount, currency, category, notes, gst, needsCheck, images, matchedFolderId });
   });
   return entries;
 }
+
+/* ============================================================
+   CATEGORY MAPPING STEP (runs before the import preview when the
+   file uses categories that don't exist in the app yet)
+   ============================================================ */
+let pendingCatMapEntries = null;
+let pendingCatMapSourceLabel = '';
+let catMapChoices = {}; // categoryName -> { mode:'new'|'existing', existingValue }
+
+function getUnknownCategories(entries){
+  const seen = new Set();
+  entries.forEach(e=>{ if(e.category && !CATEGORIES.includes(e.category)) seen.add(e.category); });
+  return [...seen];
+}
+
+function routeThroughCategoryMapping(entries, sourceLabel){
+  const unknown = getUnknownCategories(entries);
+  if(unknown.length===0){
+    openImportPreview(entries, sourceLabel);
+    return;
+  }
+  pendingCatMapEntries = entries;
+  pendingCatMapSourceLabel = sourceLabel;
+  catMapChoices = {};
+  unknown.forEach(cat=>{ catMapChoices[cat] = { mode:'new', existingValue: CATEGORIES[0] }; });
+
+  const container = document.getElementById('catMapRows');
+  container.innerHTML = '';
+  unknown.forEach(cat=>{
+    const row = document.createElement('div');
+    row.className = 'catmap-row';
+    row.innerHTML = `
+      <div class="catmap-name">${escapeHtml(cat)}</div>
+      <div class="catmap-choice">
+        <button class="catmap-new active" type="button">+ Add as new</button>
+        <button class="catmap-existing" type="button">Map to existing</button>
+      </div>
+      <select class="catmap-existing-select">${CATEGORIES.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}</select>
+    `;
+    const newBtn = row.querySelector('.catmap-new');
+    const existingBtn = row.querySelector('.catmap-existing');
+    const select = row.querySelector('.catmap-existing-select');
+    newBtn.onclick = ()=>{
+      newBtn.classList.add('active'); existingBtn.classList.remove('active');
+      select.style.display = 'none';
+      catMapChoices[cat] = { mode:'new', existingValue: CATEGORIES[0] };
+    };
+    existingBtn.onclick = ()=>{
+      existingBtn.classList.add('active'); newBtn.classList.remove('active');
+      select.style.display = 'block';
+      catMapChoices[cat] = { mode:'existing', existingValue: select.value };
+    };
+    select.addEventListener('change', ()=>{ catMapChoices[cat] = { mode:'existing', existingValue: select.value }; });
+    container.appendChild(row);
+  });
+
+  document.getElementById('catMapBackdrop').classList.add('open');
+  document.getElementById('catMapSheet').classList.add('open');
+}
+function closeCatMapSheet(){
+  document.getElementById('catMapBackdrop').classList.remove('open');
+  document.getElementById('catMapSheet').classList.remove('open');
+}
+document.getElementById('catMapCloseBtn').onclick = closeCatMapSheet;
+document.getElementById('btnCatMapCancel').onclick = ()=>{
+  closeCatMapSheet();
+  pendingCatMapEntries = null;
+  showToast('Import cancelled');
+};
+document.getElementById('btnCatMapContinue').onclick = ()=>{
+  // apply each mapping choice across all entries, and register any genuinely new categories
+  Object.entries(catMapChoices).forEach(([originalCat, choice])=>{
+    if(choice.mode==='new'){
+      if(!CATEGORIES.includes(originalCat)){ CATEGORIES.push(originalCat); persistCategories(); }
+    } else {
+      pendingCatMapEntries.forEach(e=>{ if(e.category===originalCat) e.category = choice.existingValue; });
+    }
+  });
+  const entries = pendingCatMapEntries;
+  const sourceLabel = pendingCatMapSourceLabel;
+  pendingCatMapEntries = null;
+  closeCatMapSheet();
+  openImportPreview(entries, sourceLabel);
+};
 
 function openImportPreview(entries, sourceLabel){
   pendingImportRows = entries;
@@ -3098,10 +3232,11 @@ function openImportPreview(entries, sourceLabel){
     const row = document.createElement('div');
     row.className = 'import-row' + (r.needsCheck ? ' flagged':'');
     const photoTag = (r.images && r.images.length) ? ` · 📷 ${r.images.length}` : '';
+    const folderTag = r.matchedFolderId ? ` · 📁 ${escapeHtml(getFolderLabelFor(r.matchedFolderId))}` : '';
     row.innerHTML = `
       <div class="import-row-info">
         <div class="import-row-name">${escapeHtml(r.establishment || '(no name)')}</div>
-        <div class="import-row-meta">${r.date || 'no date'} · ${escapeHtml(r.category)}${photoTag}</div>
+        <div class="import-row-meta">${r.date || 'no date'} · ${escapeHtml(r.category)}${photoTag}${folderTag}</div>
       </div>
       <div class="import-row-amount">${r.currency} ${r.amount || '0.00'}</div>
     `;
@@ -3122,15 +3257,14 @@ document.getElementById('btnImportCancel').onclick = closeImportPreview;
 document.getElementById('importBackdrop').onclick = closeImportPreview;
 
 document.getElementById('btnImportConfirm').onclick = ()=>{
-  const targetFolder = document.getElementById('importFolderSelect').value;
+  const defaultFolder = document.getElementById('importFolderSelect').value;
   pendingImportRows.forEach(r=>{
     receipts.push({
-      id: receiptSeq++, folderId: targetFolder, date: r.date || new Date().toISOString().slice(0,10),
-      establishment: r.establishment, amount: r.amount || '0.00', currency: r.currency,
+      id: receiptSeq++, folderId: r.matchedFolderId || defaultFolder, date: r.date || new Date().toISOString().slice(0,10),
+      establishment: r.establishment, amount: r.amount || '0.00', currency: r.currency, gst: r.gst || '',
       category: CATEGORIES.includes(r.category) ? r.category : 'Misc',
       notes: r.notes, images: r.images || [], verified: !r.needsCheck, needsCheck: r.needsCheck,
     });
-    if(!CATEGORIES.includes(r.category) && r.category){ CATEGORIES.push(r.category); persistCategories(); }
   });
   const count = pendingImportRows.length;
   pendingImportRows = [];
@@ -3154,7 +3288,7 @@ document.getElementById('fileInputImportXlsx').addEventListener('change', async 
     const headerRow = rows[headerRowIdx];
     const dataRows = rows.slice(headerRowIdx+1);
     const entries = rowsToImportEntries(headerRow, dataRows);
-    openImportPreview(entries, file.name);
+    routeThroughCategoryMapping(entries, file.name);
   }catch(err){
     console.error(err);
     showToast('Could not read that spreadsheet — check it\'s a valid .xlsx file');
@@ -3199,7 +3333,7 @@ document.getElementById('fileInputImportPdf').addEventListener('change', async (
       showToast('Could not find a recognisable table in this PDF — try XLSX import instead');
       return;
     }
-    openImportPreview(entries, file.name + ' (best-effort — please double check every row)');
+    routeThroughCategoryMapping(entries, file.name + ' (best-effort — please double check every row)');
   }catch(err){
     console.error(err);
     showToast('Could not read that PDF — try XLSX import instead');
@@ -3220,7 +3354,7 @@ document.getElementById('fileInputImportZip').addEventListener('change', async (
     const allFiles = Object.values(zip.files).filter(f=> !f.dir);
     const xlsxEntry = allFiles.find(f=> /\.xlsx$/i.test(f.name));
     const pdfEntry = allFiles.find(f=> /\.pdf$/i.test(f.name));
-    const mediaEntries = allFiles.filter(f=> /^media\//i.test(f.name));
+    const mediaEntries = allFiles.filter(f=> /\.(jpe?g|png|heic|webp)$/i.test(f.name));
 
     if(!xlsxEntry && !pdfEntry){
       showToast('No .xlsx or .pdf report found inside that zip');
@@ -3260,7 +3394,7 @@ document.getElementById('fileInputImportZip').addEventListener('change', async (
     }
 
     const photoCount = entries.reduce((sum,r)=> sum+(r.images?r.images.length:0), 0);
-    openImportPreview(entries, `${file.name} (${photoCount} photo${photoCount===1?'':'s'} matched)`);
+    routeThroughCategoryMapping(entries, `${file.name} (${photoCount} photo${photoCount===1?'':'s'} matched)`);
   }catch(err){
     console.error(err);
     showToast('Could not read that zip file');
