@@ -771,13 +771,15 @@
           <button id="btnRunExport" style="width:100%; padding:13px; border-radius:12px; border:none; background:var(--sage-deep); color:#fff; font-size:13.5px; font-weight:700; cursor:pointer;">Export</button>
 
           <h5>Import</h5>
-          <p>Bring receipts in from a spreadsheet (reliable) or a PDF report (best-effort — every imported row will need verification, same as a scanned receipt).</p>
+          <p>Bring receipts in from a spreadsheet (reliable), a PDF report (best-effort — every imported row will need verification, same as a scanned receipt), or a full export zip (report + photos, matched automatically by filename).</p>
           <div style="display:flex; gap:8px;">
             <button id="btnImportXlsx" style="flex:1; padding:12px; border-radius:11px; border:1.5px solid var(--sage); background:var(--card); color:var(--sage-deep); font-size:13px; font-weight:700; cursor:pointer;">Import .xlsx</button>
             <button id="btnImportPdf" style="flex:1; padding:12px; border-radius:11px; border:1.5px solid var(--rule); background:var(--card); color:var(--ink-soft); font-size:13px; font-weight:700; cursor:pointer;">Import .pdf</button>
           </div>
+          <button id="btnImportZip" style="width:100%; margin-top:8px; padding:12px; border-radius:11px; border:1.5px solid var(--sage); background:var(--sage-pale); color:var(--sage-deep); font-size:13px; font-weight:700; cursor:pointer;">Import .zip (report + photos)</button>
           <input type="file" id="fileInputImportXlsx" accept=".xlsx,.xls" style="display:none;">
           <input type="file" id="fileInputImportPdf" accept=".pdf" style="display:none;">
+          <input type="file" id="fileInputImportZip" accept=".zip" style="display:none;">
         </div>
       </details>
 
@@ -928,7 +930,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.6.0'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
+const APP_VERSION = '1.7.0'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
@@ -2812,14 +2814,16 @@ function buildPdfReport(rows, filenameMap){
   const doc = new jsPDF({ unit:'pt', format:'a4' });
   let currentFolder = null;
   let body = [];
-  const sections = []; // {folderLabel, body, linkTargets: [{rowIndex, target}]}
+  let linkTargets = []; // parallel array to body — same row index => link target filename or null
+  const sections = [];
 
   rows.forEach(r=>{
     const folderLabel = getFolderLabelFor(r.folderId);
     if(folderLabel !== currentFolder){
-      if(body.length) sections.push({ folderLabel: currentFolder, body });
+      if(body.length) sections.push({ folderLabel: currentFolder, body, linkTargets });
       currentFolder = folderLabel;
       body = [];
+      linkTargets = [];
     }
     const names = filenameMap ? (filenameMap[r.id]||[]) : [];
     const imageLabel = names.length ? names.join(', ') : (r.images&&r.images.length ? `${r.images.length} photo(s)` : '-');
@@ -2827,8 +2831,9 @@ function buildPdfReport(rows, filenameMap){
       formatDateForReport(r.date), r.establishment||'', (parseFloat(r.amount)||0).toFixed(2),
       r.currency||'AUD', r.category||'Misc', imageLabel, r.notes||'-'
     ]);
+    linkTargets.push(names.length ? `media/${names[0]}` : null);
   });
-  if(body.length) sections.push({ folderLabel: currentFolder, body });
+  if(body.length) sections.push({ folderLabel: currentFolder, body, linkTargets });
 
   let firstSection = true;
   sections.forEach(section=>{
@@ -2845,6 +2850,22 @@ function buildPdfReport(rows, filenameMap){
       headStyles: { fillColor:[122,148,130], textColor:255, fontStyle:'bold' },
       columnStyles: { 2:{halign:'right'} },
       margin:{ left:40, right:40 },
+      didParseCell: (data)=>{
+        // style the Image column to look like a real hyperlink when one exists
+        if(data.section==='body' && data.column.index===5 && section.linkTargets[data.row.index]){
+          data.cell.styles.textColor = [80,110,190];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+      didDrawCell: (data)=>{
+        // draw the actual clickable link annotation over the Image cell
+        if(data.section==='body' && data.column.index===5){
+          const target = section.linkTargets[data.row.index];
+          if(target){
+            doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url: target });
+          }
+        }
+      },
     });
   });
 
@@ -2927,6 +2948,7 @@ const COLUMN_ALIASES = {
   currency: ['currency','curr'],
   category: ['category','cat','type'],
   notes: ['notes','note','memo','comment'],
+  image: ['image','photo','receipt','file','attachment'],
 };
 
 function detectColumnIndex(headers, aliases){
@@ -2965,17 +2987,19 @@ function parseFlexibleDate(value){
   return '';
 }
 
+function parseXlsxArrayBuffer(arrayBuffer){
+  const data = new Uint8Array(arrayBuffer);
+  const wb = XLSX.read(data, {type:'array', cellDates:false});
+  const firstSheet = wb.Sheets[wb.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(firstSheet, {header:1, defval:''});
+}
+
 function parseXlsxFile(file){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
     reader.onload = (e)=>{
-      try{
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, {type:'array', cellDates:false});
-        const firstSheet = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(firstSheet, {header:1, defval:''});
-        resolve(rows);
-      }catch(err){ reject(err); }
+      try{ resolve(parseXlsxArrayBuffer(e.target.result)); }
+      catch(err){ reject(err); }
     };
     reader.onerror = ()=> reject(reader.error);
     reader.readAsArrayBuffer(file);
@@ -2983,8 +3007,10 @@ function parseXlsxFile(file){
 }
 
 // shared by both XLSX rows and PDF-extracted table-like text — takes an array of
-// header-labelled row objects and turns them into pending import receipts
-function rowsToImportEntries(headerRow, dataRows){
+// header-labelled row objects and turns them into pending import receipts.
+// mediaMap (optional): filename -> dataURL, used to attach matching photos from a
+// zip import so imported rows arrive with their images already linked.
+function rowsToImportEntries(headerRow, dataRows, mediaMap){
   const idx = {
     date: detectColumnIndex(headerRow, COLUMN_ALIASES.date),
     establishment: detectColumnIndex(headerRow, COLUMN_ALIASES.establishment),
@@ -2992,6 +3018,7 @@ function rowsToImportEntries(headerRow, dataRows){
     currency: detectColumnIndex(headerRow, COLUMN_ALIASES.currency),
     category: detectColumnIndex(headerRow, COLUMN_ALIASES.category),
     notes: detectColumnIndex(headerRow, COLUMN_ALIASES.notes),
+    image: detectColumnIndex(headerRow, COLUMN_ALIASES.image),
   };
 
   const entries = [];
@@ -3013,8 +3040,18 @@ function rowsToImportEntries(headerRow, dataRows){
 
     if(!establishment && !amount) return; // not a usable row
 
+    // match referenced image filename(s) against the media map, if one was supplied
+    let images = [];
+    if(mediaMap && idx.image>-1){
+      const rawRef = String(row[idx.image]||'').trim();
+      if(rawRef && rawRef!=='-'){
+        const names = rawRef.split(',').map(n=>n.trim());
+        images = names.map(n=> mediaMap[n]).filter(Boolean);
+      }
+    }
+
     const needsCheck = !date || !establishment || !amount;
-    entries.push({ date, establishment, amount, currency, category, notes, needsCheck });
+    entries.push({ date, establishment, amount, currency, category, notes, needsCheck, images });
   });
   return entries;
 }
@@ -3040,10 +3077,11 @@ function openImportPreview(entries, sourceLabel){
   entries.forEach((r,i)=>{
     const row = document.createElement('div');
     row.className = 'import-row' + (r.needsCheck ? ' flagged':'');
+    const photoTag = (r.images && r.images.length) ? ` · 📷 ${r.images.length}` : '';
     row.innerHTML = `
       <div class="import-row-info">
         <div class="import-row-name">${escapeHtml(r.establishment || '(no name)')}</div>
-        <div class="import-row-meta">${r.date || 'no date'} · ${escapeHtml(r.category)}</div>
+        <div class="import-row-meta">${r.date || 'no date'} · ${escapeHtml(r.category)}${photoTag}</div>
       </div>
       <div class="import-row-amount">${r.currency} ${r.amount || '0.00'}</div>
     `;
@@ -3070,7 +3108,7 @@ document.getElementById('btnImportConfirm').onclick = ()=>{
       id: receiptSeq++, folderId: targetFolder, date: r.date || new Date().toISOString().slice(0,10),
       establishment: r.establishment, amount: r.amount || '0.00', currency: r.currency,
       category: CATEGORIES.includes(r.category) ? r.category : 'Misc',
-      notes: r.notes, images: [], verified: !r.needsCheck, needsCheck: r.needsCheck,
+      notes: r.notes, images: r.images || [], verified: !r.needsCheck, needsCheck: r.needsCheck,
     });
     if(!CATEGORIES.includes(r.category) && r.category){ CATEGORIES.push(r.category); persistCategories(); }
   });
@@ -3103,6 +3141,30 @@ document.getElementById('fileInputImportXlsx').addEventListener('change', async 
   }
 });
 
+async function extractPdfText(arrayBuffer){
+  const pdf = await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+  let fullText = '';
+  for(let i=1;i<=pdf.numPages;i++){
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(item=>item.str).join(' ');
+    fullText += '\n' + pageText;
+  }
+  return fullText;
+}
+
+// best-effort: PDFs don't preserve a clean row/column grid the way a spreadsheet does,
+// so this looks for header-like keywords, then treats each following line as one row
+// split on big whitespace gaps — the same forgiving approach used for OCR'd receipt text
+function parsePdfTableText(fullText, mediaMap){
+  const lines = fullText.split('\n').map(l=>l.trim()).filter(Boolean);
+  const headerLineIdx = lines.findIndex(l=> /date/i.test(l) && /(amount|total)/i.test(l));
+  if(headerLineIdx===-1) return null;
+  const headerRow = lines[headerLineIdx].split(/\s{2,}/);
+  const dataLines = lines.slice(headerLineIdx+1).map(l=> l.split(/\s{2,}/));
+  return rowsToImportEntries(headerRow, dataLines, mediaMap);
+}
+
 document.getElementById('btnImportPdf').onclick = ()=> document.getElementById('fileInputImportPdf').click();
 document.getElementById('fileInputImportPdf').addEventListener('change', async (e)=>{
   const file = e.target.files[0];
@@ -3111,31 +3173,77 @@ document.getElementById('fileInputImportPdf').addEventListener('change', async (
   showToast('Reading PDF text…');
   try{
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({data:arrayBuffer}).promise;
-    let fullText = '';
-    for(let i=1;i<=pdf.numPages;i++){
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const pageText = content.items.map(item=>item.str).join(' ');
-      fullText += '\n' + pageText;
-    }
-    // best-effort: PDFs don't preserve a clean row/column grid the way a spreadsheet
-    // does, so this looks for header-like keywords, then treats each following line as
-    // one row split on big whitespace gaps or multiple-space runs — the same forgiving
-    // approach used for OCR'd receipt text, just applied per-line across the whole doc
-    const lines = fullText.split('\n').map(l=>l.trim()).filter(Boolean);
-    const headerLineIdx = lines.findIndex(l=> /date/i.test(l) && /(amount|total)/i.test(l));
-    if(headerLineIdx===-1){
+    const fullText = await extractPdfText(arrayBuffer);
+    const entries = parsePdfTableText(fullText);
+    if(!entries){
       showToast('Could not find a recognisable table in this PDF — try XLSX import instead');
       return;
     }
-    const headerRow = lines[headerLineIdx].split(/\s{2,}/);
-    const dataLines = lines.slice(headerLineIdx+1).map(l=> l.split(/\s{2,}/));
-    const entries = rowsToImportEntries(headerRow, dataLines);
     openImportPreview(entries, file.name + ' (best-effort — please double check every row)');
   }catch(err){
     console.error(err);
     showToast('Could not read that PDF — try XLSX import instead');
+  }
+});
+
+// Import a full export bundle back in: a .zip containing the report (xlsx or pdf) plus
+// a media/ folder of photos, exactly matching what "Export with photos" produces. Rows
+// are matched to their photos by filename, so imported receipts arrive with images attached.
+document.getElementById('btnImportZip').onclick = ()=> document.getElementById('fileInputImportZip').click();
+document.getElementById('fileInputImportZip').addEventListener('change', async (e)=>{
+  const file = e.target.files[0];
+  e.target.value = '';
+  if(!file) return;
+  showToast('Reading zip file…');
+  try{
+    const zip = await JSZip.loadAsync(file);
+    const allFiles = Object.values(zip.files).filter(f=> !f.dir);
+    const xlsxEntry = allFiles.find(f=> /\.xlsx$/i.test(f.name));
+    const pdfEntry = allFiles.find(f=> /\.pdf$/i.test(f.name));
+    const mediaEntries = allFiles.filter(f=> /^media\//i.test(f.name));
+
+    if(!xlsxEntry && !pdfEntry){
+      showToast('No .xlsx or .pdf report found inside that zip');
+      return;
+    }
+
+    // build filename -> dataURL map from the media folder first, so it's ready for
+    // whichever report format we find
+    const mediaMap = {};
+    for(const mf of mediaEntries){
+      const base64 = await mf.async('base64');
+      const basename = mf.name.split('/').pop();
+      const ext = basename.split('.').pop().toLowerCase();
+      const mime = ext==='png' ? 'image/png' : 'image/jpeg';
+      mediaMap[basename] = `data:${mime};base64,${base64}`;
+    }
+
+    let entries = [];
+    if(xlsxEntry){
+      const buf = await xlsxEntry.async('arraybuffer');
+      const rows = parseXlsxArrayBuffer(buf);
+      let headerRowIdx = rows.findIndex(row=>
+        detectColumnIndex(row, COLUMN_ALIASES.date)>-1 || detectColumnIndex(row, COLUMN_ALIASES.amount)>-1
+      );
+      if(headerRowIdx===-1) headerRowIdx = 0;
+      const headerRow = rows[headerRowIdx];
+      const dataRows = rows.slice(headerRowIdx+1);
+      entries = rowsToImportEntries(headerRow, dataRows, mediaMap);
+    } else if(pdfEntry){
+      const buf = await pdfEntry.async('arraybuffer');
+      const fullText = await extractPdfText(buf);
+      entries = parsePdfTableText(fullText, mediaMap) || [];
+      if(entries.length===0){
+        showToast('Could not find a recognisable table in the PDF inside that zip');
+        return;
+      }
+    }
+
+    const photoCount = entries.reduce((sum,r)=> sum+(r.images?r.images.length:0), 0);
+    openImportPreview(entries, `${file.name} (${photoCount} photo${photoCount===1?'':'s'} matched)`);
+  }catch(err){
+    console.error(err);
+    showToast('Could not read that zip file');
   }
 });
 
