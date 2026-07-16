@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Ledger — Receipt Tracker</title>
+<title>Ledgr — Receipt Tracker</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
@@ -40,8 +40,21 @@
     display:flex; align-items:center; justify-content:center; padding:24px;
   }
   .login-card{ width:100%; max-width:380px; }
-  .login-brand{ text-align:center; margin-bottom:18px; }
-  .login-brand h1{ font-size:24px; margin:4px 0 0; font-weight:700; letter-spacing:-0.02em; }
+  .login-brand{ text-align:center; margin-bottom:24px; }
+  .login-logo{ display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .login-logo-word{
+    font-size:44px; font-weight:800; letter-spacing:0.02em; color:var(--ink);
+    line-height:1; position:relative; display:inline-block;
+  }
+  .login-logo-word::after{
+    content:''; display:block; width:34px; height:4px; border-radius:3px;
+    background:var(--sage-deep); margin:10px auto 0;
+  }
+  .login-logo-by{
+    font-family:var(--mono); font-size:10.5px; font-weight:700; letter-spacing:0.16em;
+    text-transform:uppercase; color:var(--sage-deep); margin-top:8px;
+  }
+  .login-version{ font-family:var(--mono); font-size:10px; color:var(--ink-soft); opacity:0.6; margin-top:10px; }
   .login-warning{
     font-size:11.5px; line-height:1.5; color:var(--amber); background:#F4E2D3;
     padding:10px 12px; border-radius:10px; margin-bottom:18px; text-align:center;
@@ -49,9 +62,6 @@
   .login-error{
     font-size:12.5px; color:var(--red); background:#F4E2DD; padding:9px 12px;
     border-radius:10px; margin-bottom:10px; text-align:center;
-  }
-  .login-hint{
-    font-size:11px; color:var(--ink-soft); text-align:center; margin-top:16px; font-family:var(--mono);
   }
 
   /* ---------- Top bar / ledger header ---------- */
@@ -485,13 +495,16 @@
 <div class="login-screen" id="loginScreen">
   <div class="login-card">
     <div class="login-brand">
-      <div class="brand-mark">Engineer of Things · Ledger <span id="loginVersionBadge" style="opacity:0.6; font-weight:400;"></span></div>
-      <h1>Receipt Hub</h1>
+      <div class="login-logo">
+        <span class="login-logo-word">LEDGR</span>
+        <span class="login-logo-by">BY ENGINEER OF THINGS</span>
+      </div>
+      <div class="login-version"><span id="loginVersionBadge"></span></div>
     </div>
     <p class="login-warning">⚠ Testing build — this login only separates data locally on this device. It is not real account security.</p>
     <div class="field">
       <label>Username</label>
-      <input type="text" id="loginUsername" autocapitalize="none" autocorrect="off" placeholder="admin">
+      <input type="text" id="loginUsername" autocapitalize="none" autocorrect="off" placeholder="Username">
     </div>
     <div class="field">
       <label>Password</label>
@@ -499,7 +512,6 @@
     </div>
     <div id="loginError" class="login-error" style="display:none;"></div>
     <button id="btnLogin" class="btn confirm" style="width:100%; margin-top:6px;">Log in</button>
-    <p class="login-hint">Test accounts: <strong>admin</strong> / DJZYdevs &nbsp;·&nbsp; <strong>admin2</strong> / test</p>
   </div>
 </div>
 
@@ -509,7 +521,7 @@
   <div class="topbar">
     <div class="brand">
       <div>
-        <div class="brand-mark">Engineer of Things · Ledger <span id="versionBadge" style="opacity:0.6; font-weight:400;">v1.0</span></div>
+        <div class="brand-mark">Engineer of Things · Ledgr <span id="versionBadge" style="opacity:0.6; font-weight:400;">v1.0</span></div>
         <h1>Receipts</h1>
         <div id="currentUserIndicator" style="font-size:11px; color:var(--ink-soft); margin-top:2px; font-family:var(--mono);">👤 admin</div>
       </div>
@@ -582,7 +594,7 @@
     </button>
   </div>
 
-  <input type="file" id="fileInputLibrary" accept="image/*" multiple>
+  <input type="file" id="fileInputLibrary" accept="image/*,application/pdf" multiple>
   <input type="file" id="fileInputCameraFallback" accept="image/*" capture="environment">
 
   <!-- ANALYSIS PAGE -->
@@ -843,6 +855,19 @@
           <button id="btnClearAllData" style="width:100%; padding:13px; border-radius:12px; border:1.5px solid #D9A896; background:#FBEEE9; color:#8A3A2C; font-size:13.5px; font-weight:700; cursor:pointer; margin-top:6px;">Clear all receipts &amp; start fresh</button>
         </div>
       </details>
+
+      <details class="menu-section">
+        <summary>License &amp; copyright</summary>
+        <div class="menu-section-body">
+          <p style="margin-top:0; font-family:var(--mono); font-size:11.5px; line-height:1.7; white-space:pre-wrap;">Copyright © 2026 Engineer of Things. All Rights Reserved.
+
+This software, including its source code, design, branding ("Ledgr" and associated marks), and all associated content, is the proprietary property of Engineer of Things.
+
+No license, express or implied, is granted by the publication, distribution, or display of this software. Copying, redistributing, modifying, or commercially exploiting this software without written permission is not permitted.
+
+This app may be made viewable in a public repository for demonstration purposes only. Public visibility does not grant any rights to use, copy, modify, or distribute it.</p>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -963,7 +988,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.8.1'; // bump this each time meaningful changes ship — shown next to "Ledger" in the header
+const APP_VERSION = '1.9.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
@@ -1646,17 +1671,49 @@ document.getElementById('camDone').onclick = ()=>{
 };
 
 /* ---- Library upload ---- */
+// Renders every page of a PDF file to a compressed JPEG data URL, so a PDF receipt
+// can be treated identically to a photographed one from this point on — same OCR call,
+// same thumbnail/lightbox display, same storage. Multi-page PDFs become a multi-page
+// receipt, same as the existing multi-page camera capture flow.
+async function pdfFileToImages(file, maxDimension=1600, quality=0.75){
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+  const images = [];
+  for(let pageNum=1; pageNum<=pdf.numPages; pageNum++){
+    const page = await pdf.getPage(pageNum);
+    const baseViewport = page.getViewport({scale:1});
+    const scale = Math.min(maxDimension / baseViewport.width, maxDimension / baseViewport.height, 3);
+    const viewport = page.getViewport({scale: Math.max(scale, 1)});
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    images.push(canvas.toDataURL('image/jpeg', quality));
+  }
+  return images;
+}
+
 document.getElementById('btnLibrary').onclick = ()=> document.getElementById('fileInputLibrary').click();
 
 document.getElementById('fileInputLibrary').addEventListener('change', async (e)=>{
   const files = Array.from(e.target.files);
   if(files.length===0) return;
   for(const f of files){
-    const rawDataUrl = await fileToDataUrl(f);
-    // photo library images can be much larger than camera captures (e.g. iPhone HEIC->JPEG
-    // conversions at full sensor resolution) — compress on the way in to keep storage/export sane
-    const dataUrl = await compressImage(rawDataUrl, 1600, 0.75);
-    queueReceiptForOCR([dataUrl]); // each uploaded file = its own receipt for bulk processing
+    try{
+      if(f.type==='application/pdf' || /\.pdf$/i.test(f.name)){
+        const pageImages = await pdfFileToImages(f);
+        queueReceiptForOCR(pageImages); // all pages of one PDF = one multi-page receipt
+      } else {
+        const rawDataUrl = await fileToDataUrl(f);
+        // photo library images can be much larger than camera captures (e.g. iPhone HEIC->JPEG
+        // conversions at full sensor resolution) — compress on the way in to keep storage/export sane
+        const dataUrl = await compressImage(rawDataUrl, 1600, 0.75);
+        queueReceiptForOCR([dataUrl]); // each uploaded file = its own receipt for bulk processing
+      }
+    }catch(err){
+      console.error('Failed to process uploaded file', f.name, err);
+      showToast(`Couldn't read "${f.name}" — skipped`);
+    }
   }
   e.target.value = '';
   processQueue();
@@ -3046,7 +3103,10 @@ function parseFlexibleDate(value){
 
 function parseXlsxArrayBuffer(arrayBuffer){
   const data = new Uint8Array(arrayBuffer);
-  const wb = XLSX.read(data, {type:'array', cellDates:false});
+  // cellFormula:true is required — SheetJS does NOT parse formulas into cell.f by
+  // default, which is exactly why the HYPERLINK() formula backfill never found
+  // anything: cell.f was always undefined without this option.
+  const wb = XLSX.read(data, {type:'array', cellDates:false, cellFormula:true});
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
   return { rows, sheet };
