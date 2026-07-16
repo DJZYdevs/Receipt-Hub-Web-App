@@ -988,7 +988,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.9.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
+const APP_VERSION = '1.9.1'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
@@ -2880,6 +2880,13 @@ function buildXlsxWorkbook(rows, filenameMap){
   const merges = [];
   const hyperlinks = {}; // cellRef -> {Target}
 
+  // brand wordmark, top-right of the sheet. Note: SheetJS's free/community edition
+  // has limited support for WRITING cell styles (bold, color, alignment), so this is
+  // plain text positioned in the rightmost columns rather than a fully styled treatment
+  // matching the app's login screen — still clearly a "logo" in spirit, just unstyled.
+  sheetData.push(['', '', '', '', '', 'LEDGR', 'by Engineer of Things']);
+  sheetData.push([]); // spacer row before the first folder section
+
   let currentFolder = null;
   rows.forEach(r=>{
     const folderLabel = getFolderLabelFor(r.folderId);
@@ -2948,6 +2955,19 @@ function buildPdfReport(rows, filenameMap){
   sections.forEach(section=>{
     if(!firstSection) doc.addPage();
     firstSection = false;
+
+    // brand wordmark, top-right of the page — matches the app's login screen treatment
+    const pageWidth = doc.internal.pageSize.getWidth();
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(31, 42, 36); // --ink
+    doc.text('LEDGR', pageWidth - 40, 32, { align:'right' });
+    doc.setFontSize(7);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(78, 107, 88); // --sage-deep
+    doc.text('BY ENGINEER OF THINGS', pageWidth - 40, 40, { align:'right' });
+    doc.setTextColor(0, 0, 0);
+
     doc.setFontSize(13);
     doc.setFont(undefined,'bold');
     doc.text(`Folder: ${section.folderLabel}`, 40, 40);
@@ -3193,10 +3213,11 @@ function rowsToImportEntries(headerRow, dataRows, mediaMap){
 
     // match referenced image filename(s) against the media map, if one was supplied
     let images = [];
-    if(mediaMap && idx.image>-1){
-      const rawRef = String(row[idx.image]||'').trim();
-      if(rawRef && rawRef!=='-'){
-        const names = rawRef.split(',').map(n=>n.trim());
+    let rawImageRef = '';
+    if(idx.image>-1){
+      rawImageRef = String(row[idx.image]||'').trim();
+      if(mediaMap && rawImageRef && rawImageRef!=='-'){
+        const names = rawImageRef.split(',').map(n=>n.trim());
         images = names.map(n=> mediaMap[n]).filter(Boolean);
       }
     }
@@ -3211,7 +3232,7 @@ function rowsToImportEntries(headerRow, dataRows, mediaMap){
     }
 
     const needsCheck = !date || !establishment || !amount;
-    entries.push({ date, establishment, amount, currency, category, notes, gst, needsCheck, images, matchedFolderId });
+    entries.push({ date, establishment, amount, currency, category, notes, gst, needsCheck, images, matchedFolderId, rawImageRef });
   });
   return entries;
 }
@@ -3491,14 +3512,20 @@ document.getElementById('fileInputImportZip').addEventListener('change', async (
     const photoCount = entries.reduce((sum,r)=> sum+(r.images?r.images.length:0), 0);
     console.log('[zip import] rows expecting a photo:', entries.filter(e2=>true).length, '| rows that actually matched one:', entries.filter(e2=>e2.images&&e2.images.length).length);
 
-    // build a clear diagnostic label instead of a bare, unexplained "0 matched" —
-    // there are two very different reasons that could happen and they need different fixes
+    const rowsWithAnyRef = entries.filter(e2=> e2.rawImageRef && e2.rawImageRef!=='-').length;
+
+    // build a precise diagnostic instead of a bare "0 matched" — this pinpoints exactly
+    // which stage failed: no photos in the zip at all, the Image column had no filename
+    // reference to work with (formula backfill found nothing), or filenames just didn't
+    // match what's in the zip's media files
     let photoNote;
     if(mediaEntries.length===0){
-      photoNote = `⚠ no image files found inside this zip — check your photos were actually included`;
+      photoNote = `no image files found inside this zip — check your photos were actually included`;
+    } else if(rowsWithAnyRef===0){
+      photoNote = `⚠ ${mediaEntries.length} image file(s) found in zip, but no rows had any filename reference in the Image column at all (v${APP_VERSION})`;
     } else if(photoCount===0){
       const sampleFound = mediaEntries.slice(0,3).map(f=>f.name.split('/').pop()).join(', ');
-      photoNote = `⚠ ${mediaEntries.length} image file(s) found in zip (e.g. ${sampleFound}) but none matched the filenames referenced in the report — check they weren't renamed`;
+      photoNote = `⚠ ${rowsWithAnyRef} row(s) reference a filename, ${mediaEntries.length} image(s) found in zip (e.g. ${sampleFound}), but none matched — check filenames weren't renamed (v${APP_VERSION})`;
     } else {
       photoNote = `${photoCount} photo${photoCount===1?'':'s'} matched`;
     }
