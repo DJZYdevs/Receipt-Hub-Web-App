@@ -988,7 +988,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.9.2'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
+const APP_VERSION = '1.10.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
@@ -1671,12 +1671,11 @@ document.getElementById('camDone').onclick = ()=>{
 };
 
 /* ---- Library upload ---- */
-// Renders every page of a PDF file to a compressed JPEG data URL, so a PDF receipt
-// can be treated identically to a photographed one from this point on — same OCR call,
-// same thumbnail/lightbox display, same storage. Multi-page PDFs become a multi-page
-// receipt, same as the existing multi-page camera capture flow.
-async function pdfFileToImages(file, maxDimension=1600, quality=0.75){
-  const arrayBuffer = await file.arrayBuffer();
+// Renders every page of a PDF to a compressed JPEG data URL, so a PDF receipt can be
+// treated identically to a photographed one from this point on — same OCR call, same
+// thumbnail/lightbox display, same storage. Multi-page PDFs become a multi-page receipt,
+// same as the existing multi-page camera capture flow.
+async function pdfArrayBufferToImages(arrayBuffer, maxDimension=1600, quality=0.75){
   const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
   const images = [];
   for(let pageNum=1; pageNum<=pdf.numPages; pageNum++){
@@ -1691,6 +1690,9 @@ async function pdfFileToImages(file, maxDimension=1600, quality=0.75){
     images.push(canvas.toDataURL('image/jpeg', quality));
   }
   return images;
+}
+async function pdfFileToImages(file, maxDimension=1600, quality=0.75){
+  return pdfArrayBufferToImages(await file.arrayBuffer(), maxDimension, quality);
 }
 
 document.getElementById('btnLibrary').onclick = ()=> document.getElementById('fileInputLibrary').click();
@@ -3507,12 +3509,15 @@ document.getElementById('fileInputImportZip').addEventListener('change', async (
   try{
     const zip = await JSZip.loadAsync(file);
     const allFiles = Object.values(zip.files).filter(f=> !f.dir);
-    const xlsxEntry = allFiles.find(f=> /\.xlsx$/i.test(f.name));
-    const pdfEntry = allFiles.find(f=> /\.pdf$/i.test(f.name));
-    const mediaEntries = allFiles.filter(f=> /\.(jpe?g|png|heic|webp)$/i.test(f.name));
+    // exclude anything inside a media/ folder when looking for the report itself —
+    // otherwise a PDF *receipt attachment* (e.g. media/receipt_1007497.pdf) could get
+    // mistaken for the report file if it happens to appear first in the zip listing
+    const xlsxEntry = allFiles.find(f=> /\.xlsx$/i.test(f.name) && !/^media\//i.test(f.name));
+    const pdfEntry = allFiles.find(f=> /\.pdf$/i.test(f.name) && !/^media\//i.test(f.name));
+    const mediaEntries = allFiles.filter(f=> /\.(jpe?g|png|heic|webp|pdf)$/i.test(f.name) && f!==xlsxEntry && f!==pdfEntry);
 
     console.log('[zip import] all entries in zip:', allFiles.map(f=>f.name));
-    console.log('[zip import] detected image files:', mediaEntries.map(f=>f.name));
+    console.log('[zip import] detected media files:', mediaEntries.map(f=>f.name));
 
     if(!xlsxEntry && !pdfEntry){
       showToast('No .xlsx or .pdf report found inside that zip');
@@ -3520,14 +3525,26 @@ document.getElementById('fileInputImportZip').addEventListener('change', async (
     }
 
     // build filename -> dataURL map from the media folder first, so it's ready for
-    // whichever report format we find
+    // whichever report format we find. PDF attachments get their first page rendered
+    // to an image via pdf.js, so they slot into the exact same photo pipeline as any
+    // jpg/png attachment — same thumbnail, same lightbox, no separate code path needed.
     const mediaMap = {};
     for(const mf of mediaEntries){
-      const base64 = await mf.async('base64');
       const basename = mf.name.split('/').pop();
       const ext = basename.split('.').pop().toLowerCase();
-      const mime = ext==='png' ? 'image/png' : 'image/jpeg';
-      mediaMap[basename] = `data:${mime};base64,${base64}`;
+      if(ext==='pdf'){
+        try{
+          const buf = await mf.async('arraybuffer');
+          const pages = await pdfArrayBufferToImages(buf);
+          if(pages.length) mediaMap[basename] = pages[0]; // first page represents this attachment
+        }catch(err){
+          console.error('Failed to render PDF attachment', basename, err);
+        }
+      } else {
+        const base64 = await mf.async('base64');
+        const mime = ext==='png' ? 'image/png' : 'image/jpeg';
+        mediaMap[basename] = `data:${mime};base64,${base64}`;
+      }
     }
 
     let entries = [];
@@ -3565,12 +3582,12 @@ document.getElementById('fileInputImportZip').addEventListener('change', async (
     // match what's in the zip's media files
     let photoNote;
     if(mediaEntries.length===0){
-      photoNote = `no image files found inside this zip — check your photos were actually included`;
+      photoNote = `no photo or PDF attachments found inside this zip — check they were actually included`;
     } else if(rowsWithAnyRef===0){
-      photoNote = `⚠ ${mediaEntries.length} image file(s) found in zip, but no rows had any filename reference in the Image column at all (v${APP_VERSION})`;
+      photoNote = `⚠ ${mediaEntries.length} attachment(s) found in zip, but no rows had any filename reference in the Image column at all (v${APP_VERSION})`;
     } else if(photoCount===0){
       const sampleFound = mediaEntries.slice(0,3).map(f=>f.name.split('/').pop()).join(', ');
-      photoNote = `⚠ ${rowsWithAnyRef} row(s) reference a filename, ${mediaEntries.length} image(s) found in zip (e.g. ${sampleFound}), but none matched — check filenames weren't renamed (v${APP_VERSION})`;
+      photoNote = `⚠ ${rowsWithAnyRef} row(s) reference a filename, ${mediaEntries.length} attachment(s) found in zip (e.g. ${sampleFound}), but none matched — check filenames weren't renamed (v${APP_VERSION})`;
     } else {
       photoNote = `${photoCount} photo${photoCount===1?'':'s'} matched`;
     }
