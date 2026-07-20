@@ -30,7 +30,7 @@
   body{
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     min-height:100vh;
-    padding-bottom:90px;
+    padding-bottom:calc(100px + env(safe-area-inset-bottom));
   }
   .app{max-width:480px;margin:0 auto;position:relative;min-height:100vh;background:var(--paper);}
 
@@ -540,7 +540,10 @@
 
     <div class="month-nav" id="monthNav">
       <button class="month-nav-btn" id="monthPrevBtn">◀</button>
-      <button class="month-nav-label" id="monthNavLabel">July 2026</button>
+      <div style="position:relative; flex:1;">
+        <button class="month-nav-label" id="monthNavLabel" style="width:100%;">July 2026</button>
+        <input type="month" id="monthPickerInput" style="position:absolute; inset:0; opacity:0; width:100%; height:100%; border:none; margin:0; padding:0; font-size:16px;">
+      </div>
       <button class="month-nav-btn" id="monthNextBtn">▶</button>
       <button class="month-nav-today" id="monthTodayBtn">Today</button>
     </div>
@@ -553,7 +556,7 @@
         </div>
         <div class="spend-bar-track"><div class="spend-bar-fill current" id="currentMonthFill"></div></div>
       </div>
-      <div class="spend-bar-row">
+      <div class="spend-bar-row" id="prevMonthRow" style="cursor:pointer;">
         <div class="spend-bar-label">
           <span id="prevMonthLabel">Last month</span>
           <span class="spend-bar-amount" id="prevMonthAmount">$0.00</span>
@@ -988,7 +991,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.11.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
+const APP_VERSION = '1.12.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
@@ -1389,6 +1392,7 @@ function monthYearLabel(month, year){
 
 function renderMonthNav(){
   document.getElementById('monthNavLabel').innerText = monthYearLabel(viewedMonth, viewedYear);
+  document.getElementById('monthPickerInput').value = `${viewedYear}-${String(viewedMonth+1).padStart(2,'0')}`;
 }
 
 function changeMonth(delta){
@@ -1420,6 +1424,12 @@ function renderSpendBars(){
   document.getElementById('prevMonthLabel').innerText = monthYearLabel(prevMonth, prevYear);
   document.getElementById('prevMonthAmount').innerText = `$${prevTotal.toFixed(2)}`;
   document.getElementById('prevMonthFill').style.width = `${(prevTotal/maxVal)*100}%`;
+
+  document.getElementById('prevMonthRow').onclick = ()=>{
+    viewedMonth = prevMonth;
+    viewedYear = prevYear;
+    renderReceiptList(); // recomputes both bars relative to the newly-selected month
+  };
 }
 
 /* ============================================================
@@ -1465,25 +1475,28 @@ function renderAnalysisPage(){
   const chart = document.getElementById('analysisChart');
   chart.innerHTML = '';
 
-  let buckets = []; // [{label, total}]
+  let buckets = []; // [{label, total, targetMonth, targetYear}]
 
   if(analysisPeriod==='monthly'){
     buckets = MONTH_ABBR.map((label, i)=>({
       label,
       total: list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===analysisYear && d.getMonth()===i; })
-                  .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0)
+                  .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0),
+      targetMonth: i, targetYear: analysisYear
     }));
   } else if(analysisPeriod==='quarterly'){
     buckets = [0,1,2,3].map(q=>({
       label: `Q${q+1}`,
       total: list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===analysisYear && Math.floor(d.getMonth()/3)===q; })
-                  .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0)
+                  .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0),
+      targetMonth: q*3, targetYear: analysisYear
     }));
   } else if(analysisPeriod==='halfyear'){
     buckets = [0,1].map(h=>({
       label: h===0 ? 'H1 (Jan–Jun)' : 'H2 (Jul–Dec)',
       total: list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===analysisYear && Math.floor(d.getMonth()/6)===h; })
-                  .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0)
+                  .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0),
+      targetMonth: h*6, targetYear: analysisYear
     }));
   } else if(analysisPeriod==='yearly'){
     // compare the 5 years ending at analysisYear, so "year nav" (hidden here) isn't
@@ -1495,7 +1508,8 @@ function renderAnalysisPage(){
       buckets.push({
         label: String(y),
         total: list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===y; })
-                    .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0)
+                    .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0),
+        targetMonth: 0, targetYear: y
       });
     }
   }
@@ -1507,11 +1521,23 @@ function renderAnalysisPage(){
   buckets.forEach(b=>{
     const row = document.createElement('div');
     row.className = 'achart-row';
+    row.style.cursor = 'pointer';
     row.innerHTML = `
       <div class="achart-label">${b.label}</div>
       <div class="achart-track"><div class="achart-fill" style="width:${(b.total/maxVal)*100}%"></div></div>
       <div class="achart-value">$${b.total.toFixed(0)}</div>
     `;
+    row.onclick = ()=>{
+      // leaving Analysis is a bigger jump than the dashboard's own month bars, so this
+      // asks first — an accidental tap here shouldn't unexpectedly dump you out of the
+      // page you were just analysing
+      const periodLabel = monthYearLabel(b.targetMonth, b.targetYear);
+      if(!confirm(`View receipts for ${periodLabel}? This will leave the Analysis page.`)) return;
+      viewedMonth = b.targetMonth;
+      viewedYear = b.targetYear;
+      closeAnalysisPage();
+      renderReceiptList();
+    };
     chart.appendChild(row);
   });
 
@@ -1586,20 +1612,15 @@ document.getElementById('monthTodayBtn').onclick = ()=>{
   viewedYear = new Date().getFullYear();
   renderReceiptList();
 };
-// tapping the month label itself opens a quick year/month jump prompt — useful for
-// navigating further back than a few taps of the arrows would be worth
-document.getElementById('monthNavLabel').onclick = ()=>{
-  const input = prompt('Jump to month (format: YYYY-MM, e.g. 2026-03)', `${viewedYear}-${String(viewedMonth+1).padStart(2,'0')}`);
-  if(!input) return;
-  const m = input.match(/^(\d{4})-(\d{1,2})$/);
+// native month/year wheel picker overlays the label — tap to open, no typing required
+document.getElementById('monthPickerInput').addEventListener('change', (e)=>{
+  const m = e.target.value.match(/^(\d{4})-(\d{2})$/);
   if(m){
     viewedYear = parseInt(m[1],10);
     viewedMonth = parseInt(m[2],10) - 1;
     renderReceiptList();
-  } else {
-    showToast('Use format YYYY-MM, e.g. 2026-03');
   }
-};
+});
 
 // on startup: check for a remembered session (so closing/reopening the app doesn't
 // force re-login every time — logout is what clears this, same as most real apps)
@@ -2930,6 +2951,8 @@ async function buildMediaFolder(zip, rows){
   const mediaFolder = zip.folder('media');
   const filenameMap = {};
   let counter = 1;
+  const totalImages = rows.reduce((sum,r)=> sum + (r.images||[]).length, 0);
+  let processed = 0;
   for(const r of rows){
     const names = [];
     for(const img of (r.images||[])){
@@ -2939,6 +2962,11 @@ async function buildMediaFolder(zip, rows){
       const base64Data = compressed.split(',')[1];
       mediaFolder.file(filename, base64Data, {base64:true});
       names.push(filename);
+      processed++;
+      if(totalImages > 15 && processed % 10 === 0){
+        showToast(`Compressing photos… ${processed} of ${totalImages}`);
+        await new Promise(res=> setTimeout(res, 0));
+      }
     }
     filenameMap[r.id] = names;
   }
@@ -3086,11 +3114,19 @@ async function runExport(){
 
   if(format==='json'){
     if(includePhotos){
-      showToast('Compressing photos…');
+      const totalImages = rows.reduce((sum,r)=> sum + (r.images||[]).length, 0);
+      let processed = 0;
       const withImages = [];
       for(const r of rows){
         const compressedImages = [];
-        for(const img of (r.images||[])) compressedImages.push(await compressImage(img));
+        for(const img of (r.images||[])){
+          compressedImages.push(await compressImage(img));
+          processed++;
+          if(totalImages > 15 && processed % 10 === 0){
+            showToast(`Compressing photos… ${processed} of ${totalImages}`);
+            await new Promise(res=> setTimeout(res, 0));
+          }
+        }
         withImages.push({ folder:getFolderLabelFor(r.folderId), date:r.date, establishment:r.establishment, amount:r.amount, currency:r.currency, gst:r.gst||null, category:r.category, notes:r.notes, images:compressedImages });
       }
       downloadJson({ exportedAt:new Date().toISOString(), receipts:withImages }, 'receipts-with-photos');
@@ -3129,7 +3165,14 @@ async function runExport(){
     zip.file(`report-${stamp}.pdf`, pdfBlob);
   }
 
-  const zipBlob = await zip.generateAsync({type:'blob'});
+  let lastZipPercent = -1;
+  const zipBlob = await zip.generateAsync({type:'blob'}, (metadata)=>{
+    const pct = Math.round(metadata.percent);
+    if(pct !== lastZipPercent && pct % 10 === 0){
+      lastZipPercent = pct;
+      showToast(`Building zip… ${pct}%`);
+    }
+  });
   downloadBlob(zipBlob, `receipts-export-${stamp}.zip`);
   showToast(`Exported ${rows.length} receipt${rows.length===1?'':'s'} with photos`);
 }
