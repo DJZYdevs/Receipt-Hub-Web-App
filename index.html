@@ -238,6 +238,16 @@
   .achart-track{ flex:1; height:20px; border-radius:6px; background:var(--paper-dim); overflow:hidden; position:relative; }
   .achart-fill{ height:100%; border-radius:6px; background:var(--sage-deep); transition:width .3s; }
   .achart-value{ flex:0 0 64px; font-size:11.5px; font-family:var(--mono); color:var(--ink); text-align:right; }
+
+  /* ---------- Year grid ---------- */
+  .ygrid-cell{
+    padding:14px 8px; border-radius:12px; border:1.5px solid var(--rule); background:var(--card);
+    text-align:center; cursor:pointer;
+  }
+  .ygrid-cell.current{ border-color:var(--sage-deep); background:var(--sage-pale); }
+  .ygrid-cell.empty{ opacity:0.45; }
+  .ygrid-month{ font-size:13px; font-weight:700; color:var(--ink); }
+  .ygrid-amount{ font-size:10.5px; font-family:var(--mono); color:var(--ink-soft); margin-top:4px; }
   .analysis-section-label{
     font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
     color:var(--ink-soft); margin-bottom:10px;
@@ -545,6 +555,7 @@
         <input type="month" id="monthPickerInput" style="position:absolute; inset:0; opacity:0; width:100%; height:100%; border:none; margin:0; padding:0; font-size:16px;">
       </div>
       <button class="month-nav-btn" id="monthNextBtn">▶</button>
+      <button class="month-nav-btn" id="btnOpenYearGrid" title="Year view">🗓</button>
       <button class="month-nav-today" id="monthTodayBtn">Today</button>
     </div>
 
@@ -950,6 +961,24 @@ This app may be made viewable in a public repository for demonstration purposes 
     </div>
   </div>
 
+  <!-- YEAR GRID -->
+  <div class="sheet-backdrop" id="yearGridBackdrop"></div>
+  <div class="sheet" id="yearGridSheet" style="max-height:75vh;">
+    <div class="sheet-handle"></div>
+    <div class="sheet-head">
+      <h2>Jump to month</h2>
+      <button class="sheet-close" id="yearGridCloseBtn">✕</button>
+    </div>
+    <div class="form-body">
+      <div class="year-nav" id="yearGridYearNav" style="margin-bottom:16px; width:fit-content;">
+        <button class="month-nav-btn" id="yearGridPrevBtn">◀</button>
+        <span id="yearGridYearLabel">2026</span>
+        <button class="month-nav-btn" id="yearGridNextBtn">▶</button>
+      </div>
+      <div id="yearGridMonths" style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;"></div>
+    </div>
+  </div>
+
   <!-- CATEGORY POP-OUT GRID -->
   <div class="sheet-backdrop" id="catGridBackdrop"></div>
   <div class="sheet" id="catGridSheet" style="max-height:80vh;">
@@ -991,7 +1020,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.12.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
+const APP_VERSION = '1.13.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
@@ -1394,6 +1423,71 @@ function renderMonthNav(){
   document.getElementById('monthNavLabel').innerText = monthYearLabel(viewedMonth, viewedYear);
   document.getElementById('monthPickerInput').value = `${viewedYear}-${String(viewedMonth+1).padStart(2,'0')}`;
 }
+
+/* ============================================================
+   YEAR GRID — jump to any month in a chosen year at a glance
+   ============================================================ */
+let yearGridYear = new Date().getFullYear();
+const YEAR_GRID_MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function openYearGrid(){
+  yearGridYear = viewedYear;
+  renderYearGrid();
+  document.getElementById('yearGridBackdrop').classList.add('open');
+  document.getElementById('yearGridSheet').classList.add('open');
+}
+function closeYearGrid(){
+  document.getElementById('yearGridBackdrop').classList.remove('open');
+  document.getElementById('yearGridSheet').classList.remove('open');
+}
+function renderYearGrid(){
+  document.getElementById('yearGridYearLabel').innerText = yearGridYear;
+  const folderReceipts = receipts.filter(r=> r.folderId===activeFolderId && r.currency==='AUD');
+  const now = new Date();
+  const grid = document.getElementById('yearGridMonths');
+  grid.innerHTML = '';
+  YEAR_GRID_MONTH_ABBR.forEach((label, i)=>{
+    const total = folderReceipts
+      .filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===yearGridYear && d.getMonth()===i; })
+      .reduce((s,r)=> s+(parseFloat(r.amount)||0), 0);
+    const isCurrent = i===viewedMonth && yearGridYear===viewedYear;
+    const isFuture = yearGridYear > now.getFullYear() || (yearGridYear===now.getFullYear() && i > now.getMonth());
+    const cell = document.createElement('div');
+    cell.className = 'ygrid-cell' + (isCurrent ? ' current':'') + (total===0 ? ' empty':'');
+    cell.innerHTML = `<div class="ygrid-month">${label}</div><div class="ygrid-amount">${total>0 ? '$'+total.toFixed(0) : (isFuture ? '—' : '$0')}</div>`;
+    cell.onclick = ()=>{
+      viewedMonth = i;
+      viewedYear = yearGridYear;
+      closeYearGrid();
+      renderReceiptList();
+    };
+    grid.appendChild(cell);
+  });
+}
+document.getElementById('btnOpenYearGrid').onclick = openYearGrid;
+document.getElementById('yearGridCloseBtn').onclick = closeYearGrid;
+document.getElementById('yearGridBackdrop').onclick = closeYearGrid;
+document.getElementById('yearGridPrevBtn').onclick = ()=>{ yearGridYear--; renderYearGrid(); };
+document.getElementById('yearGridNextBtn').onclick = ()=>{ yearGridYear++; renderYearGrid(); };
+
+// swipe left/right on the receipt list to move between months — skipped while a
+// search/filter is active, since the list isn't scoped to a single month then
+(function(){
+  const listEl = document.getElementById('receiptList');
+  let touchStartX = 0, touchStartY = 0;
+  listEl.addEventListener('touchstart', (e)=>{
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, {passive:true});
+  listEl.addEventListener('touchend', (e)=>{
+    if(hasActiveFilters()) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    if(Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)*1.5){
+      changeMonth(dx < 0 ? 1 : -1);
+    }
+  }, {passive:true});
+})();
 
 function changeMonth(delta){
   viewedMonth += delta;
