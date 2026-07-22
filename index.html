@@ -264,6 +264,8 @@
     padding:10px 12px; background:var(--card); border:1px solid var(--rule); border-radius:10px;
   }
   .import-row.flagged{ border-color:var(--amber); background:#FCF6EE; }
+  .import-row.duplicate{ border-color:#D9A876; background:#FBF2E6; }
+  .import-row-dup-tag{ font-size:10px; font-weight:700; color:#8A6524; text-transform:uppercase; letter-spacing:.03em; }
   .import-row-info{ min-width:0; flex:1; }
   .import-row-name{ font-size:13px; font-weight:700; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .import-row-meta{ font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
@@ -704,6 +706,10 @@
       <span id="multiNavArrows">◀ swipe or use buttons ▶</span>
     </div>
     <div id="ocrErrorBanner" style="display:none; margin:0 20px 10px; padding:10px 12px; background:#F4E2DD; border-radius:10px; font-size:12.5px; color:#8A3A2C; line-height:1.4;"></div>
+    <div id="duplicateBanner" style="display:none; margin:0 20px 10px; padding:10px 12px; background:#F4E2D3; border-radius:10px; font-size:12.5px; color:#7A5A24; line-height:1.4;">
+      <div id="duplicateBannerText"></div>
+      <button id="btnDiscardAsDuplicate" style="margin-top:8px; padding:7px 12px; border-radius:8px; border:1.5px solid #D9B26B; background:#fff; color:#7A5A24; font-size:12px; font-weight:700; cursor:pointer;">Discard this — it's a duplicate</button>
+    </div>
 
     <div class="receipt-preview-strip" id="previewStrip"></div>
     <div id="previewHint" style="font-size:10.5px;color:var(--ink-soft);padding:0 20px 8px;font-family:var(--mono); display:none;">Tap image to view full size &amp; compare against extracted data</div>
@@ -919,6 +925,11 @@ This app may be made viewable in a public repository for demonstration purposes 
         <label>Default folder <span style="font-weight:400; text-transform:none; letter-spacing:0;">(used for rows without a recognised folder)</span></label>
         <select id="importFolderSelect" style="width:100%; padding:10px 12px; border-radius:10px; border:1.5px solid var(--rule); font-size:14px; background:var(--card); color:var(--ink);"></select>
       </div>
+      <p id="importDuplicateSummary" style="display:none; font-size:12.5px; color:#7A5A24; background:#F4E2D3; padding:9px 12px; border-radius:10px; margin:0 0 10px;"></p>
+      <label id="skipDuplicatesRow" style="display:none; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-soft); margin:0 0 12px; font-weight:600;">
+        <input type="checkbox" id="skipDuplicatesCheckbox" checked style="width:16px; height:16px;">
+        Skip likely duplicates when importing
+      </label>
       <div id="importRowsPreview" style="display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow-y:auto; margin-top:10px;"></div>
     </div>
     <div class="sheet-actions">
@@ -1020,7 +1031,7 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.13.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
+const APP_VERSION = '1.14.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
@@ -1333,6 +1344,29 @@ function receiptMatchesFilters(r){
 
 function hasActiveFilters(){
   return !!(activeFilters.query || activeFilters.category || activeFilters.dateFrom || activeFilters.dateTo);
+}
+
+/* ============================================================
+   DUPLICATE DETECTION — flags likely duplicates (same date + amount
+   + establishment) for the user to confirm or dismiss. Never silently
+   blocks a save, since a genuine same-day repeat purchase is real.
+   ============================================================ */
+function normalizeEstablishmentForMatch(name){
+  return (name||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'');
+}
+function isLikelyDuplicatePair(a, b){
+  if(!a.date || !b.date || a.date !== b.date) return false;
+  const amtA = parseFloat(a.amount)||0, amtB = parseFloat(b.amount)||0;
+  if(Math.abs(amtA-amtB) > 0.01) return false;
+  const estA = normalizeEstablishmentForMatch(a.establishment);
+  const estB = normalizeEstablishmentForMatch(b.establishment);
+  if(!estA || !estB) return false; // blank names are too unreliable to compare
+  return estA === estB;
+}
+// checks a candidate {date, amount, establishment, folderId} against every saved
+// receipt in that same folder — returns the matching receipt, or null
+function findDuplicateReceipt(candidate, excludeId){
+  return receipts.find(r=> r.folderId===candidate.folderId && r.id!==excludeId && isLikelyDuplicatePair(r, candidate)) || null;
 }
 
 function renderReceiptList(){
@@ -2468,6 +2502,7 @@ function renderFolderSelectRow(selectedId){
     btn.onclick = ()=>{
       currentReviewDraft.folderId = f.id;
       renderFolderSelectRow(f.id);
+      recheckDuplicateBanner();
     };
     row.appendChild(btn);
   });
@@ -2673,6 +2708,44 @@ document.getElementById('inputGst').addEventListener('input', ()=>{
   document.getElementById('gstAutoTag').innerText = '';
 });
 
+// re-checks for a duplicate whenever the user edits the fields that matter for matching,
+// so the banner reflects manual corrections too, not just the initial OCR-extracted values
+function recheckDuplicateBanner(){
+  const dupBanner = document.getElementById('duplicateBanner');
+  const folderId = (currentReviewDraft && currentReviewDraft.folderId) || activeFolderId;
+  const candidate = {
+    date: document.getElementById('inputDate').value,
+    amount: document.getElementById('inputAmount').value,
+    establishment: document.getElementById('inputEstablishment').value,
+    folderId,
+  };
+  const dupMatch = findDuplicateReceipt(candidate, editingExistingId);
+  if(dupMatch){
+    dupBanner.style.display = 'block';
+    document.getElementById('duplicateBannerText').innerHTML =
+      `<strong>Possible duplicate.</strong> You already have "${escapeHtml(dupMatch.establishment)}" for ${formatDate(dupMatch.date)} at ${dupMatch.currency} ${parseFloat(dupMatch.amount).toFixed(2)} in this folder. If this is a separate purchase, no action needed.`;
+  } else {
+    dupBanner.style.display = 'none';
+  }
+}
+['inputDate','inputEstablishment','inputAmount'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', recheckDuplicateBanner);
+  document.getElementById(id).addEventListener('change', recheckDuplicateBanner);
+});
+document.getElementById('btnDiscardAsDuplicate').onclick = ()=>{
+  if(!confirm('Discard this entry as a duplicate?')) return;
+  if(editingExistingId){
+    receipts = receipts.filter(r=>r.id!==editingExistingId);
+    editingExistingId = null;
+    closeSheet();
+    renderAll();
+    showToast('Duplicate discarded');
+  } else {
+    advanceReviewQueueOrClose();
+    showToast('Duplicate discarded');
+  }
+};
+
 function populateSheet(){
   gstManuallyEdited = false;
   const d = currentReviewDraft;
@@ -2729,6 +2802,8 @@ function populateSheet(){
   confBadge('confDate', c.date);
   confBadge('confEst', c.establishment);
   confBadge('confAmount', c.amount);
+
+  recheckDuplicateBanner();
 
   document.getElementById('rawOcrText').innerText = d.rawOcrText || '(no OCR text captured for this entry)';
 
@@ -3570,6 +3645,67 @@ document.getElementById('btnCatMapContinue').onclick = ()=>{
   openImportPreview(entries, sourceLabel);
 };
 
+// annotates each import entry with isDuplicate/duplicateReason — checks both against
+// existing saved receipts (in whichever folder that row will land in) and against
+// EARLIER rows in the same import batch (catches a source file that lists the same
+// transaction twice)
+function annotateImportDuplicates(entries, defaultFolder){
+  const seenInBatch = [];
+  entries.forEach(e=>{
+    const folderId = e.matchedFolderId || defaultFolder;
+    const candidate = { date:e.date, amount:e.amount, establishment:e.establishment, folderId };
+    const existingMatch = findDuplicateReceipt(candidate, null);
+    const batchMatch = seenInBatch.find(o=> o.folderId===folderId && isLikelyDuplicatePair(o, candidate));
+    if(existingMatch){
+      e.isDuplicate = true; e.duplicateReason = 'already saved';
+    } else if(batchMatch){
+      e.isDuplicate = true; e.duplicateReason = 'repeated in this file';
+    } else {
+      e.isDuplicate = false; e.duplicateReason = '';
+    }
+    seenInBatch.push(candidate);
+  });
+  return entries;
+}
+
+function renderImportRows(entries){
+  const preview = document.getElementById('importRowsPreview');
+  preview.innerHTML = '';
+  entries.forEach((r,i)=>{
+    const row = document.createElement('div');
+    row.className = 'import-row' + (r.needsCheck ? ' flagged':'') + (r.isDuplicate ? ' duplicate':'');
+    const photoTag = (r.images && r.images.length) ? ` · 📷 ${r.images.length}` : '';
+    const folderTag = r.matchedFolderId ? ` · 📁 ${escapeHtml(getFolderLabelFor(r.matchedFolderId))}` : '';
+    const dupTag = r.isDuplicate ? `<div class="import-row-dup-tag">⚠ Possible duplicate — ${escapeHtml(r.duplicateReason)}</div>` : '';
+    row.innerHTML = `
+      <div class="import-row-info">
+        <div class="import-row-name">${escapeHtml(r.establishment || '(no name)')}</div>
+        <div class="import-row-meta">${r.date || 'no date'} · ${escapeHtml(r.category)}${photoTag}${folderTag}</div>
+        ${dupTag}
+      </div>
+      <div class="import-row-amount">${r.currency} ${r.amount || '0.00'}</div>
+    `;
+    preview.appendChild(row);
+  });
+}
+
+function refreshImportDuplicates(){
+  const defaultFolder = document.getElementById('importFolderSelect').value;
+  annotateImportDuplicates(pendingImportRows, defaultFolder);
+  const dupCount = pendingImportRows.filter(r=>r.isDuplicate).length;
+  const dupSummary = document.getElementById('importDuplicateSummary');
+  const skipRow = document.getElementById('skipDuplicatesRow');
+  if(dupCount>0){
+    dupSummary.style.display = 'block';
+    dupSummary.innerText = `${dupCount} row${dupCount===1?'':'s'} look${dupCount===1?'s':''} like a duplicate of an existing receipt or another row in this file.`;
+    skipRow.style.display = 'flex';
+  } else {
+    dupSummary.style.display = 'none';
+    skipRow.style.display = 'none';
+  }
+  renderImportRows(pendingImportRows);
+}
+
 function openImportPreview(entries, sourceLabel){
   pendingImportRows = entries;
   document.getElementById('importSheetTitle').innerText = `Import preview — ${sourceLabel}`;
@@ -3586,22 +3722,7 @@ function openImportPreview(entries, sourceLabel){
     folderSelect.appendChild(opt);
   });
 
-  const preview = document.getElementById('importRowsPreview');
-  preview.innerHTML = '';
-  entries.forEach((r,i)=>{
-    const row = document.createElement('div');
-    row.className = 'import-row' + (r.needsCheck ? ' flagged':'');
-    const photoTag = (r.images && r.images.length) ? ` · 📷 ${r.images.length}` : '';
-    const folderTag = r.matchedFolderId ? ` · 📁 ${escapeHtml(getFolderLabelFor(r.matchedFolderId))}` : '';
-    row.innerHTML = `
-      <div class="import-row-info">
-        <div class="import-row-name">${escapeHtml(r.establishment || '(no name)')}</div>
-        <div class="import-row-meta">${r.date || 'no date'} · ${escapeHtml(r.category)}${photoTag}${folderTag}</div>
-      </div>
-      <div class="import-row-amount">${r.currency} ${r.amount || '0.00'}</div>
-    `;
-    preview.appendChild(row);
-  });
+  refreshImportDuplicates();
 
   document.getElementById('btnImportConfirm').disabled = entries.length===0;
   document.getElementById('importBackdrop').classList.add('open');
@@ -3615,10 +3736,14 @@ function closeImportPreview(){
 document.getElementById('importCloseBtn').onclick = closeImportPreview;
 document.getElementById('btnImportCancel').onclick = closeImportPreview;
 document.getElementById('importBackdrop').onclick = closeImportPreview;
+document.getElementById('importFolderSelect').addEventListener('change', refreshImportDuplicates);
 
 document.getElementById('btnImportConfirm').onclick = async ()=>{
   const defaultFolder = document.getElementById('importFolderSelect').value;
-  const rowsToImport = pendingImportRows;
+  const skipDuplicates = document.getElementById('skipDuplicatesCheckbox').checked;
+  let rowsToImport = pendingImportRows;
+  const skippedCount = skipDuplicates ? rowsToImport.filter(r=>r.isDuplicate).length : 0;
+  if(skipDuplicates) rowsToImport = rowsToImport.filter(r=> !r.isDuplicate);
   const total = rowsToImport.length;
   pendingImportRows = [];
   closeImportPreview();
@@ -3639,7 +3764,9 @@ document.getElementById('btnImportConfirm').onclick = async ()=>{
   }
 
   renderAll();
-  showToast(`Imported ${total} receipt${total===1?'':'s'}`);
+  showToast(skippedCount>0
+    ? `Imported ${total} receipt${total===1?'':'s'} — skipped ${skippedCount} likely duplicate${skippedCount===1?'':'s'}`
+    : `Imported ${total} receipt${total===1?'':'s'}`);
 };
 
 document.getElementById('btnImportXlsx').onclick = ()=> document.getElementById('fileInputImportXlsx').click();
