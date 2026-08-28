@@ -31,7 +31,7 @@
    nothing — the rest of the app is unaffected.
    ============================================================ */
 
-const GOOGLE_CLIENT_ID = 'PASTE_YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '259379633108-o2p7ntpli67svraqc1p7rig6ju9o94di.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const BACKUP_FOLDER_NAME = 'Ledgr Backups';
 
