@@ -620,6 +620,8 @@ async function completeLogin(username){
   document.getElementById('appRoot').style.display = 'block';
   document.getElementById('currentUserIndicator').innerText = `👤 ${username}`;
   renderAll();
+  if(typeof renderBackupStatus === 'function') renderBackupStatus();
+  if(typeof maybeAutoBackup === 'function') maybeAutoBackup('login');
 }
 
 function attemptLogin(){

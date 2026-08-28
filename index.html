@@ -9,6 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -372,12 +373,14 @@
         </div>
       </details>
 
-      <details class="menu-section">
-        <summary>Google Drive archive</summary>
+      <details class="menu-section" open>
+        <summary>Backup &amp; Restore (Google Drive)</summary>
         <div class="menu-section-body">
-          <p style="margin-top:0;">A Drive folder is ready to receive your receipts: <strong>Engineer of Things — Receipts</strong>, with Personal / Work / Investments / Other subfolders matching the app.</p>
-          <a href="https://drive.google.com/drive/folders/1F68n8iMC3T1AVHTEU0rUDs8Q_7fpfJsN" target="_blank" style="display:block; text-align:center; padding:12px; border-radius:12px; background:var(--sage-deep); color:#fff; text-decoration:none; font-size:13.5px; font-weight:700; margin:10px 0;">Open Drive folder ↗</a>
-          <p style="margin-top:-4px;">This static file can't upload to Drive directly from your phone (no backend to hold the sign-in), so for now: export a report or zip above, then share the download to the Drive app's folder above.</p>
+          <p style="margin-top:0;">Automatically backs up everything to a "Ledgr Backups" folder in your Google Drive — receipts, categories, category rankings, and known merchants (not just receipts, so nothing gets left out). Runs quietly once a day and right after every import.</p>
+          <p id="backupStatusText" style="margin-top:-4px; font-size:12.5px; color:var(--ink-soft);">Loading…</p>
+          <button id="btnBackupNow" style="width:100%; padding:13px; border-radius:12px; border:none; background:var(--sage-deep); color:#fff; font-size:13.5px; font-weight:700; cursor:pointer; margin-bottom:8px;">Backup now</button>
+          <button id="btnShowRestoreList" style="width:100%; padding:12px; border-radius:11px; border:1.5px solid var(--sage); background:var(--card); color:var(--sage-deep); font-size:13px; font-weight:700; cursor:pointer;">Restore from a backup…</button>
+          <div id="restoreBackupList" style="margin-top:10px;"></div>
         </div>
       </details>
 
@@ -616,5 +619,6 @@ This app may be made viewable in a public repository for demonstration purposes 
 <script src="export.js"></script>
 <script src="import.js"></script>
 <script src="ui-extras.js"></script>
+<script src="backup.js"></script>
 </body>
 </html>

@@ -445,6 +445,7 @@ document.getElementById('btnImportConfirm').onclick = async ()=>{
   showToast(skippedCount>0
     ? `Imported ${total} receipt${total===1?'':'s'} — skipped ${skippedCount} deselected row${skippedCount===1?'':'s'}`
     : `Imported ${total} receipt${total===1?'':'s'}`);
+  if(typeof maybeAutoBackup === 'function') maybeAutoBackup('import');
 };
 
 document.getElementById('btnImportXlsx').onclick = ()=> document.getElementById('fileInputImportXlsx').click();
