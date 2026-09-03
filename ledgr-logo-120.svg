@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5B7C68"/>
+      <stop offset="100%" stop-color="#4E6B58"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2.5" stdDeviation="3" flood-color="#1F2A24" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- App-icon background -->
+  <rect width="120" height="120" rx="27" fill="url(#bg)"/>
+
+  <!-- Receipt, tilted for a physical, dropped-on-the-desk feel -->
+  <g transform="translate(60,62) rotate(-7) translate(-28,-40)" filter="url(#soft-shadow)">
+    <!-- Receipt body: straight top/sides, torn zigzag bottom -->
+    <path d="M0,0 L56,0 L56,64 L48,68.5 L40,64 L32,68.5 L24,64 L16,68.5 L8,64 L0,68.5 Z"
+          fill="#F6F4EE"/>
+
+    <!-- Line items: varied widths, like real printed text -->
+    <rect x="9"  y="13" width="38" height="3.2" rx="1.6" fill="#D8D2C2"/>
+    <rect x="9"  y="21" width="28" height="3.2" rx="1.6" fill="#D8D2C2"/>
+    <rect x="9"  y="29" width="33" height="3.2" rx="1.6" fill="#D8D2C2"/>
+    <rect x="9"  y="37" width="22" height="3.2" rx="1.6" fill="#D8D2C2"/>
+
+    <!-- Divider rule before the total -->
+    <rect x="9" y="46" width="38" height="1.4" fill="#D8D2C2"/>
+
+    <!-- Total line: the one highlighted, amber accent -->
+    <rect x="9" y="52" width="24" height="4.2" rx="2.1" fill="#C98A44"/>
+  </g>
+</svg>
