@@ -1,6 +1,14 @@
 /* ============================================================
    BACKUP — full-state backup to Google Drive.
 
+   v2 change (after the v1.17→1.18 silent-failure incident): a failed
+   auto-backup used to only log to console — invisible to the user.
+   Safari blocks the silent cross-site re-auth Google's token client
+   relies on (especially in standalone/home-screen mode), so after the
+   first manual connect, every silent daily/import backup was failing
+   quietly. Now a failure sets a visible, sticky warning until the
+   user reconnects — it never fails silently again.
+
    Why this exists: the app's built-in Export only ever wrote out
    `receipts` (from IndexedDB). category_usage and known_merchants
    live separately in localStorage and were never included — that
@@ -17,21 +25,20 @@
    3. APIs & Services → Credentials → Create Credentials →
       OAuth client ID → Application type: "Web application".
       Under "Authorized JavaScript origins" add your GitHub Pages
-      URL exactly, e.g. https://yourusername.github.io
+      URL exactly, e.g. https://djzydevs.github.io
       (no trailing slash, no path).
    4. Copy the generated Client ID and paste it below as
       GOOGLE_CLIENT_ID.
    5. APIs & Services → OAuth consent screen → Audience →
       add your own Google account under "Test users" (required
       since this app won't be Google-verified — test mode is fine
-      for personal use, tokens just expire after 7 days and you'll
-      need to reconnect via "Backup now").
+      for personal use).
    ---------------------------------------------------------------
    Until GOOGLE_CLIENT_ID is filled in, backup/restore quietly does
    nothing — the rest of the app is unaffected.
    ============================================================ */
 
-const GOOGLE_CLIENT_ID = '259379633108-o2p7ntpli67svraqc1p7rig6ju9o94di.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = 'PASTE_YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const BACKUP_FOLDER_NAME = 'Ledgr Backups';
 
@@ -55,10 +62,6 @@ function initDriveTokenClient(){
   return driveTokenClient;
 }
 
-// Gets a Drive access token. interactive=false tries silently (no popup) — used
-// for the automatic daily/after-import backup, so it never interrupts you.
-// interactive=true shows Google's consent screen when needed — used for the
-// manual "Backup now" button and for Restore, where a visible prompt is fine.
 function getDriveAccessToken(interactive){
   return new Promise((resolve, reject)=>{
     const client = initDriveTokenClient();
@@ -98,9 +101,6 @@ async function findOrCreateBackupFolder(token){
   return created.id;
 }
 
-// Gathers everything needed to fully restore this user's state — keep this in
-// sync with anything new added to state.js/localStorage going forward, or a
-// future field will silently fall out of backups the same way this one did.
 async function collectFullBackupPayload(){
   return {
     backupVersion: 1,
@@ -137,28 +137,39 @@ async function uploadBackupToDrive(interactive){
     body,
   });
   if(!res.ok) throw new Error('Drive upload failed: HTTP ' + res.status);
+
+  // Success clears any prior failure warning.
   localStorage.setItem(userKey('last_backup_at'), new Date().toISOString());
+  localStorage.removeItem(userKey('last_backup_failed_at'));
+  localStorage.removeItem(userKey('last_backup_error'));
   renderBackupStatus();
   return await res.json();
 }
 
 function todayStamp(){ return new Date().toISOString().slice(0, 10); }
 
-// Silent, best-effort — called on login and right after an import completes.
-// Never shows an error to the user on failure (most likely cause is Drive
-// was never connected yet); "Backup now" is the button that surfaces real
-// consent prompts / real errors.
+// Best-effort, but NEVER silent on failure anymore. Called on login, on app
+// resume (visibilitychange), and right after import.
 async function maybeAutoBackup(reason){
   if(!driveConfigured()) return;
-  if(reason === 'login'){
+  if(reason !== 'import'){
     const lastBackupDate = (localStorage.getItem(userKey('last_backup_at')) || '').slice(0, 10);
-    if(lastBackupDate === todayStamp()) return; // already backed up today
+    if(lastBackupDate === todayStamp()) return; // already succeeded today — no need to retry
   }
   try{
     await uploadBackupToDrive(false);
     if(reason === 'import') showToast('Backed up to Drive');
   }catch(err){
-    console.log('Auto-backup skipped (' + reason + '):', err.message || err);
+    console.log('Auto-backup failed (' + reason + '):', err.message || err);
+    localStorage.setItem(userKey('last_backup_failed_at'), new Date().toISOString());
+    localStorage.setItem(userKey('last_backup_error'), String(err.message || err));
+    renderBackupStatus();
+    // Loud once per day — not on every single app open, but impossible to miss.
+    const warnedToday = (localStorage.getItem(userKey('last_backup_warn_shown')) || '').slice(0, 10) === todayStamp();
+    if(!warnedToday){
+      localStorage.setItem(userKey('last_backup_warn_shown'), new Date().toISOString());
+      showToast('⚠ Drive backup failed — open Menu to reconnect');
+    }
   }
 }
 
@@ -169,10 +180,13 @@ async function runManualBackup(){
   }
   showToast('Backing up…');
   try{
-    await uploadBackupToDrive(true);
+    await uploadBackupToDrive(true); // interactive — real consent prompt if needed
     showToast('Backup saved to Drive ✓');
   }catch(err){
     console.error(err);
+    localStorage.setItem(userKey('last_backup_failed_at'), new Date().toISOString());
+    localStorage.setItem(userKey('last_backup_error'), String(err.message || err));
+    renderBackupStatus();
     showToast('Backup failed — check console');
   }
 }
@@ -182,11 +196,20 @@ function renderBackupStatus(){
   if(!el) return;
   if(!driveConfigured()){
     el.innerText = 'Not set up yet — see backup.js for one-time setup steps.';
+    el.style.color = 'var(--ink-soft)';
     return;
   }
-  const last = localStorage.getItem(userKey('last_backup_at'));
-  el.innerText = last
-    ? `Last backup: ${new Date(last).toLocaleString()}`
+  const failedAt = localStorage.getItem(userKey('last_backup_failed_at'));
+  const lastOk = localStorage.getItem(userKey('last_backup_at'));
+  // A failure is only "current" if it happened more recently than the last success.
+  if(failedAt && (!lastOk || new Date(failedAt) > new Date(lastOk))){
+    el.innerText = `⚠ Backup failed (${new Date(failedAt).toLocaleString()}) — tap "Backup now" to reconnect.`;
+    el.style.color = '#8A3A2C';
+    return;
+  }
+  el.style.color = 'var(--ink-soft)';
+  el.innerText = lastOk
+    ? `Last backup: ${new Date(lastOk).toLocaleString()}`
     : 'Not backed up yet — tap "Backup now" to connect Drive.';
 }
 
@@ -222,7 +245,7 @@ async function restoreFromDriveBackup(fileId){
   localStorage.setItem(userKey('category_usage'), JSON.stringify(payload.categoryUsage || {}));
   saveKnownMerchants(payload.knownMerchants || []);
 
-  persistState(); // flushes receipts/folders/seq/activeFolder/categories to IndexedDB
+  persistState();
   renderAll();
   showToast('Restored from backup ✓');
 }
@@ -278,3 +301,10 @@ async function showRestoreList(){
 document.getElementById('btnBackupNow').onclick = runManualBackup;
 document.getElementById('btnShowRestoreList').onclick = showRestoreList;
 renderBackupStatus();
+
+// Retry on every app resume too (not just once/day at login) — if a prior
+// silent attempt failed, this gives it another chance each time you come
+// back to the app, not just once every 24 hours.
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible') maybeAutoBackup('resume');
+});
