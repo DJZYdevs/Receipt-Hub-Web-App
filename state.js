@@ -7,13 +7,14 @@ const FOLDERS = [
   {id:'investments', label:'Investments', icon:'📈', color:'#C48A3F'},
   {id:'other', label:'Other', icon:'🗂️', color:'#8C7AA9'},
 ];
-const APP_VERSION = '1.18.0'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
+const APP_VERSION = '1.18.1'; // bump this each time meaningful changes ship — shown next to "Ledgr" in the header
 
 // configure pdf.js worker (needed for PDF import/text-extraction)
 if(window['pdfjsLib']){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 }
-const CATEGORIES = ['Meals','Groceries','Fuel','Materials','Software','Travel','Utilities','Rent','Office','Tools','Parking','Subscriptions','Health','Misc'];
+const DEFAULT_CATEGORIES = ['Meals','Groceries','Fuel','Materials','Software','Travel','Utilities','Rent','Office','Tools','Parking','Subscriptions','Health','Misc'];
+const CATEGORIES = [...DEFAULT_CATEGORIES]; // mutable working copy — DEFAULT_CATEGORIES itself is never modified
 
 // ⚠️ TESTING-ONLY USER GATE — NOT REAL SECURITY.
 // These credentials live in plain text in this file, visible to anyone who opens it in
@@ -254,12 +255,16 @@ async function loadPersistedState(){
     customFolders = savedFolders || [];
     receiptSeq = savedSeq || 1;
     activeFolderId = savedActiveFolder || 'personal';
-    // reset CATEGORIES to defaults then merge in this user's saved custom categories,
-    // so switching users doesn't leak one user's custom categories into another's list
+    // Reset CATEGORIES for this user, so switching users doesn't leak one user's
+    // custom categories into another's list. New user (nothing saved yet) -> start
+    // from the defaults. Returning user -> use exactly what they last saved, as-is —
+    // do NOT re-merge in the defaults, or a category they deliberately removed would
+    // silently reappear every time the app loads.
     CATEGORIES.length = 0;
-    DEFAULT_CATEGORIES.forEach(c=> CATEGORIES.push(c));
     if(savedCategories && savedCategories.length){
-      savedCategories.forEach(c=>{ if(!CATEGORIES.includes(c)) CATEGORIES.push(c); });
+      savedCategories.forEach(c=> CATEGORIES.push(c));
+    }else{
+      DEFAULT_CATEGORIES.forEach(c=> CATEGORIES.push(c));
     }
     return true;
   }catch(err){
@@ -267,5 +272,3 @@ async function loadPersistedState(){
     return false;
   }
 }
-
-

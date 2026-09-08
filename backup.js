@@ -238,9 +238,16 @@ async function restoreFromDriveBackup(fileId){
   receiptSeq = payload.receiptSeq || 1;
   activeFolderId = payload.activeFolderId || 'personal';
 
+  // Use exactly what the backup saved — don't re-merge defaults on top, or a
+  // category the user had deliberately removed before the backup was taken
+  // would silently reappear on restore. Fall back to defaults only if the
+  // backup itself somehow has no categories at all.
   CATEGORIES.length = 0;
-  DEFAULT_CATEGORIES.forEach(c=> CATEGORIES.push(c));
-  (payload.categories || []).forEach(c=>{ if(!CATEGORIES.includes(c)) CATEGORIES.push(c); });
+  if(payload.categories && payload.categories.length){
+    payload.categories.forEach(c=> CATEGORIES.push(c));
+  }else{
+    DEFAULT_CATEGORIES.forEach(c=> CATEGORIES.push(c));
+  }
 
   localStorage.setItem(userKey('category_usage'), JSON.stringify(payload.categoryUsage || {}));
   saveKnownMerchants(payload.knownMerchants || []);
@@ -298,9 +305,79 @@ async function showRestoreList(){
   }
 }
 
+/* ---------- Auto-restore prompt for a "new" browser/device ---------- */
+// If this browser has no local receipt data for the current user, offer to
+// pull the latest Drive backup instead of silently starting them off with an
+// empty ledger (the failure mode behind the recent data-loss incident).
+// Requires a tap rather than firing automatically on load: getDriveAccessToken
+// in interactive mode generally needs a direct user gesture to reliably work
+// across browsers (this is the same Safari/consent constraint documented at
+// the top of this file) — an unprompted auto-popup on page load risks being
+// silently blocked, which is exactly the failure mode we're trying to avoid.
+//
+// Needs a banner element in index.html, e.g.:
+//   <div id="autoRestoreBanner" style="display:none;">
+//     <span>No receipts found on this browser/device.</span>
+//     <button id="autoRestoreCheckBtn">Check Drive for a backup</button>
+//     <button id="autoRestoreDismissBtn">Dismiss</button>
+//   </div>
+async function checkLocalDataEmpty(){
+  const localIndex = await idbGet(userKey('receiptIndex'));
+  return !(localIndex && localIndex.length > 0);
+}
+
+async function maybeShowAutoRestoreBanner(){
+  if(!driveConfigured()) return; // nothing to offer if Drive isn't set up
+  const isEmpty = await checkLocalDataEmpty();
+  if(!isEmpty) return; // normal case — this browser already has data, nothing to do
+  const banner = document.getElementById('autoRestoreBanner');
+  if(!banner) return;
+  banner.style.display = 'flex';
+}
+
+async function handleAutoRestoreCheck(){
+  const banner = document.getElementById('autoRestoreBanner');
+  const checkBtn = document.getElementById('autoRestoreCheckBtn');
+  checkBtn.disabled = true;
+  checkBtn.innerText = 'Checking…';
+  try{
+    const files = await listDriveBackups(); // newest first
+    if(files.length === 0){
+      showToast('No Drive backups found for this account');
+      if(banner) banner.style.display = 'none';
+      return;
+    }
+    const latest = files[0];
+    const dateStr = new Date(latest.createdTime).toLocaleString();
+    if(confirm(`Restore the most recent Drive backup (${dateStr})? This replaces anything currently on this device.`)){
+      await restoreFromDriveBackup(latest.id);
+    }
+    if(banner) banner.style.display = 'none';
+  }catch(err){
+    console.error('Auto-restore check failed', err);
+    showToast('Could not check Drive — try "Restore from backup" in Menu instead');
+  }finally{
+    checkBtn.disabled = false;
+    checkBtn.innerText = 'Check Drive for a backup';
+  }
+}
+
+const autoRestoreCheckBtn = document.getElementById('autoRestoreCheckBtn');
+if(autoRestoreCheckBtn) autoRestoreCheckBtn.onclick = handleAutoRestoreCheck;
+const autoRestoreDismissBtn = document.getElementById('autoRestoreDismissBtn');
+if(autoRestoreDismissBtn) autoRestoreDismissBtn.onclick = ()=>{
+  document.getElementById('autoRestoreBanner').style.display = 'none';
+};
+
 document.getElementById('btnBackupNow').onclick = runManualBackup;
 document.getElementById('btnShowRestoreList').onclick = showRestoreList;
 renderBackupStatus();
+
+// NOTE: maybeShowAutoRestoreBanner() is NOT called here on purpose — this file
+// runs at script-parse time, before login, when currentUser is still null.
+// Call maybeShowAutoRestoreBanner() from wherever login success is handled
+// (same place maybeAutoBackup('login') is presumably already called), after
+// currentUser is set and loadPersistedState() has run.
 
 // Retry on every app resume too (not just once/day at login) — if a prior
 // silent attempt failed, this gives it another chance each time you come
