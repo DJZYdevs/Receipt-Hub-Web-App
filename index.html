@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><link rel="apple-touch-icon" href="ledgr-logo-120.png">
+<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Ledgr — Receipt Tracker</title>
@@ -85,6 +85,15 @@
         </div>
         <div class="spend-bar-track"><div class="spend-bar-fill previous" id="prevMonthFill"></div></div>
       </div>
+    </div>
+  </div>
+
+  <!-- AUTO-RESTORE BANNER (shown when this browser/device has no local data for the current user) -->
+  <div id="autoRestoreBanner" style="display:none; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:10px 16px 0; padding:12px 14px; border-radius:12px; background:#F4E2D3; border:1.5px solid #D9B26B;">
+    <span style="font-size:12.5px; color:#7A5A24; flex:1 1 200px;">No receipts found on this browser/device.</span>
+    <div style="display:flex; gap:8px;">
+      <button id="autoRestoreCheckBtn" style="padding:8px 14px; border-radius:9px; border:none; background:#7A5A24; color:#fff; font-size:12.5px; font-weight:700; cursor:pointer;">Check Drive for a backup</button>
+      <button id="autoRestoreDismissBtn" style="padding:8px 14px; border-radius:9px; border:1.5px solid #D9B26B; background:transparent; color:#7A5A24; font-size:12.5px; font-weight:700; cursor:pointer;">Dismiss</button>
     </div>
   </div>
 

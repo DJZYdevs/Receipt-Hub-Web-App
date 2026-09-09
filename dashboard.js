@@ -622,6 +622,7 @@ async function completeLogin(username){
   renderAll();
   if(typeof renderBackupStatus === 'function') renderBackupStatus();
   if(typeof maybeAutoBackup === 'function') maybeAutoBackup('login');
+  if(typeof maybeShowAutoRestoreBanner === 'function') maybeShowAutoRestoreBanner();
 }
 
 function attemptLogin(){
