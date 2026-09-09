@@ -13,8 +13,14 @@ const APP_VERSION = '1.18.1'; // bump this each time meaningful changes ship —
 if(window['pdfjsLib']){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 }
-const DEFAULT_CATEGORIES = ['Meals','Groceries','Fuel','Materials','Software','Travel','Utilities','Rent','Office','Tools','Parking','Subscriptions','Health','Misc'];
-const CATEGORIES = [...DEFAULT_CATEGORIES]; // mutable working copy — DEFAULT_CATEGORIES itself is never modified
+// NOTE: DEFAULT_CATEGORIES is declared in review-search.js (as a Set — categories.js
+// relies on its .has() method). Do NOT redeclare it here: state.js loads first, before
+// review-search.js, and a second top-level `const DEFAULT_CATEGORIES` in this shared
+// global scope throws a SyntaxError in whichever script declares it second, silently
+// killing every binding in that file. loadPersistedState() below references
+// DEFAULT_CATEGORIES only inside a function body, which is fine — by the time it
+// actually runs (after login), every script tag has already loaded.
+const CATEGORIES = ['Meals','Groceries','Fuel','Materials','Software','Travel','Utilities','Rent','Office','Tools','Parking','Subscriptions','Health','Misc'];
 
 // ⚠️ TESTING-ONLY USER GATE — NOT REAL SECURITY.
 // These credentials live in plain text in this file, visible to anyone who opens it in
