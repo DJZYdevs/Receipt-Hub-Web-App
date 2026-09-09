@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Ledgr — Receipt Tracker</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -11,6 +11,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="stylesheet" href="styles.css">
+<style>
+  /* Belt-and-suspenders for the double-tap-zoom issue: user-scalable=no in the
+     viewport meta tag isn't fully respected by every browser for double-tap
+     specifically, so this disables it more directly. Doesn't affect normal
+     scrolling/panning — only removes the double-tap and pinch zoom gestures. */
+  html, body { touch-action: manipulation; }
+</style>
 </head>
 <body>
 <div class="login-screen" id="loginScreen">

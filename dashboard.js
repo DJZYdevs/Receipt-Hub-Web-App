@@ -206,14 +206,30 @@ function getVisibleReceiptIds(){
   return getVisibleReceipts().map(r=>r.id);
 }
 
+let lastRenderedScopeKey = null; // tracks folder+month or folder+filters, so we only
+// scroll to top when the actual visible SET changes (new month, new/cleared filters,
+// folder switch) — not on every re-render (e.g. editing a receipt in place shouldn't
+// jerk the page back to the top).
 function renderReceiptList(){
   const list = getVisibleReceipts();
   const filtering = hasActiveFilters();
+
+  const scopeKey = `${activeFolderId}::${filtering ? 'filter:'+JSON.stringify(activeFilters) : 'month:'+viewedYear+'-'+viewedMonth}`;
+  const scopeChanged = scopeKey !== lastRenderedScopeKey;
+  lastRenderedScopeKey = scopeKey;
 
   const el = document.getElementById('receiptList');
   const empty = document.getElementById('emptyState');
   el.innerHTML = '';
   document.getElementById('receiptCount').innerText = list.length;
+
+  if(scopeChanged){
+    // cover both possible scroll containers without needing to know which one
+    // this layout actually uses — harmless no-op on whichever doesn't apply
+    window.scrollTo(0, 0);
+    if(document.scrollingElement) document.scrollingElement.scrollTop = 0;
+    el.scrollTop = 0;
+  }
 
   const sectionLabel = document.getElementById('sectionLabelText');
   if(sectionLabel){
@@ -524,13 +540,32 @@ function renderAnalysisPage(){
   if(sortedCats.length===0){
     catContainer.innerHTML = '<p style="font-size:12.5px; color:var(--ink-soft);">No receipts in this range yet.</p>';
   } else {
+    const catRangeTotal = sortedCats.reduce((s,[,amt])=> s+amt, 0);
+    // "yearly" tab spans a trailing 5-year window (60 months); every other tab is
+    // scoped to a single calendar year (12 months) regardless of which sub-period
+    // (monthly/quarterly/halfyear) is selected, since the category totals above are
+    // always computed across the full year, not just the visible buckets.
+    const monthsInRange = analysisPeriod==='yearly' ? 60 : 12;
     sortedCats.forEach(([cat, amt])=>{
+      const pct = catRangeTotal>0 ? Math.round((amt/catRangeTotal)*100) : 0;
+      const avgPerMonth = Math.round(amt / monthsInRange);
       const row = document.createElement('div');
       row.className = 'acat-row';
+      row.style.cursor = 'pointer';
       row.innerHTML = `
         <div class="acat-name"><span class="acat-dot" style="background:${categoryColor(cat)}"></span>${escapeHtml(cat)}</div>
-        <div class="acat-amount">$${amt.toFixed(2)}</div>
+        <div class="acat-amount">$${amt.toFixed(2)} <span style="color:var(--ink-soft); font-weight:400;">(${pct}% · ~$${avgPerMonth}/mo)</span></div>
       `;
+      row.onclick = ()=>{
+        // jump into the filtered receipt list for this category — also switch the
+        // active folder tab to match whatever this analysis was scoped to, so the
+        // filtered results aren't silently narrower/wider than what was just shown
+        if(analysisFolder !== '__all__') activeFolderId = analysisFolder;
+        activeFilters = { query:'', category:cat, dateFrom:'', dateTo:'' };
+        closeAnalysisPage();
+        renderAll();
+        showToast(`Showing ${cat} receipts`);
+      };
       catContainer.appendChild(row);
     });
   }
