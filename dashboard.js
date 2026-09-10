@@ -445,18 +445,13 @@ function getAnalysisReceipts(){
   return list;
 }
 
-function renderAnalysisPage(){
-  document.getElementById('analysisYearLabel').innerText = analysisYear;
-  // the year nav is meaningless for the "yearly" comparison view (which spans multiple
-  // years by design), so hide it there and only show it for single-year-scoped views
-  document.getElementById('analysisYearNav').style.display = analysisPeriod==='yearly' ? 'none' : 'flex';
-
+// Computes everything the Analysis page (and the PDF snapshot export) needs, as plain
+// data — no DOM. Keeping this separate from rendering means the on-screen view and the
+// PDF export can never silently drift apart (same numbers, same scoping rules).
+function computeAnalysisSnapshot(){
   const list = getAnalysisReceipts();
-  const chart = document.getElementById('analysisChart');
-  chart.innerHTML = '';
 
-  let buckets = []; // [{label, total, targetMonth, targetYear}]
-
+  let buckets = [];
   if(analysisPeriod==='monthly'){
     buckets = MONTH_ABBR.map((label, i)=>({
       label,
@@ -479,8 +474,6 @@ function renderAnalysisPage(){
       targetMonth: h*6, targetYear: analysisYear
     }));
   } else if(analysisPeriod==='yearly'){
-    // compare the 5 years ending at analysisYear, so "year nav" (hidden here) isn't
-    // needed — instead this view always shows a trailing 5-year window anchored to today
     const endYear = new Date().getFullYear();
     const startYear = endYear - 4;
     buckets = [];
@@ -494,11 +487,81 @@ function renderAnalysisPage(){
     }
   }
 
-  const maxVal = Math.max(...buckets.map(b=>b.total), 1);
-  const rangeTotal = buckets.reduce((s,b)=> s+b.total, 0);
-  document.getElementById('analysisTotalAmount').innerText = rangeTotal.toFixed(2);
+  let rangeReceipts, rangeDateFrom, rangeDateTo, rangeLabel, monthsInRange;
+  if(analysisPeriod==='yearly'){
+    const endYear = new Date().getFullYear(), startYear = endYear-4;
+    rangeReceipts = list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()>=startYear && d.getFullYear()<=endYear; });
+    rangeDateFrom = `${startYear}-01-01`;
+    rangeDateTo = `${endYear}-12-31`;
+    rangeLabel = `${startYear}–${endYear}`;
+    monthsInRange = 60;
+  } else {
+    rangeReceipts = list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===analysisYear; });
+    rangeDateFrom = `${analysisYear}-01-01`;
+    rangeDateTo = `${analysisYear}-12-31`;
+    rangeLabel = String(analysisYear);
+    monthsInRange = 12;
+  }
 
-  buckets.forEach(b=>{
+  const catTotals = {};
+  rangeReceipts.forEach(r=>{
+    const cat = r.category || 'Misc';
+    catTotals[cat] = (catTotals[cat]||0) + (parseFloat(r.amount)||0);
+  });
+  const rangeTotal = Object.values(catTotals).reduce((s,v)=> s+v, 0);
+  const categories = Object.entries(catTotals).sort((a,b)=> b[1]-a[1]).map(([cat, amt])=>({
+    category: cat,
+    amount: amt,
+    pct: rangeTotal>0 ? Math.round((amt/rangeTotal)*100) : 0,
+    avgPerMonth: Math.round(amt / monthsInRange),
+  }));
+
+  const estTotalsRaw = {};
+  rangeReceipts.forEach(r=>{
+    const name = (r.establishment||'').trim() || 'Unknown';
+    if(!estTotalsRaw[name]) estTotalsRaw[name] = { total:0, count:0 };
+    estTotalsRaw[name].total += (parseFloat(r.amount)||0);
+    estTotalsRaw[name].count += 1;
+  });
+  const establishments = Object.entries(estTotalsRaw).sort((a,b)=> b[1].total-a[1].total).slice(0,10)
+    .map(([name, data])=>({ name, amount: data.total, count: data.count }));
+
+  // Fixed classification — Groceries/Fuel/Utilities/Rent/Health count as essential,
+  // everything else (Meals, Travel, Subscriptions, etc.) as discretionary. Matches the
+  // rough split financial advisors use (needs vs wants) rather than anything editable
+  // per-user for now — simplest version that's still genuinely useful.
+  const ESSENTIAL_CATEGORIES = new Set(['Groceries','Fuel','Utilities','Rent','Health']);
+  let essentialTotal = 0, discretionaryTotal = 0;
+  rangeReceipts.forEach(r=>{
+    const amt = parseFloat(r.amount)||0;
+    if(ESSENTIAL_CATEGORIES.has(r.category||'')) essentialTotal += amt; else discretionaryTotal += amt;
+  });
+  const essDiscTotal = essentialTotal + discretionaryTotal;
+  const essentialPct = essDiscTotal>0 ? Math.round((essentialTotal/essDiscTotal)*100) : 0;
+
+  return {
+    buckets, rangeReceipts, rangeDateFrom, rangeDateTo, rangeLabel, monthsInRange, rangeTotal,
+    categories, establishments,
+    essential: { total: essentialTotal, pct: essentialPct },
+    discretionary: { total: discretionaryTotal, pct: 100 - essentialPct },
+    folderLabel: analysisFolder==='__all__' ? 'All folders' : getFolderLabelFor(analysisFolder),
+  };
+}
+
+function renderAnalysisPage(){
+  document.getElementById('analysisYearLabel').innerText = analysisYear;
+  // the year nav is meaningless for the "yearly" comparison view (which spans multiple
+  // years by design), so hide it there and only show it for single-year-scoped views
+  document.getElementById('analysisYearNav').style.display = analysisPeriod==='yearly' ? 'none' : 'flex';
+
+  const snapshot = computeAnalysisSnapshot();
+  const chart = document.getElementById('analysisChart');
+  chart.innerHTML = '';
+
+  const maxVal = Math.max(...snapshot.buckets.map(b=>b.total), 1);
+  document.getElementById('analysisTotalAmount').innerText = snapshot.buckets.reduce((s,b)=> s+b.total, 0).toFixed(2);
+
+  snapshot.buckets.forEach(b=>{
     const row = document.createElement('div');
     row.className = 'achart-row';
     row.style.cursor = 'pointer';
@@ -521,34 +584,13 @@ function renderAnalysisPage(){
     chart.appendChild(row);
   });
 
-  // category breakdown across whatever date range the buckets above cover
-  let rangeReceipts;
-  if(analysisPeriod==='yearly'){
-    const endYear = new Date().getFullYear(), startYear = endYear-4;
-    rangeReceipts = list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()>=startYear && d.getFullYear()<=endYear; });
-  } else {
-    rangeReceipts = list.filter(r=>{ const d=new Date((r.date||'')+'T00:00:00'); return d.getFullYear()===analysisYear; });
-  }
-  const catTotals = {};
-  rangeReceipts.forEach(r=>{
-    const cat = r.category || 'Misc';
-    catTotals[cat] = (catTotals[cat]||0) + (parseFloat(r.amount)||0);
-  });
-  const sortedCats = Object.entries(catTotals).sort((a,b)=> b[1]-a[1]);
+  // ---- By category ----
   const catContainer = document.getElementById('analysisCatBreakdown');
   catContainer.innerHTML = '';
-  if(sortedCats.length===0){
+  if(snapshot.categories.length===0){
     catContainer.innerHTML = '<p style="font-size:12.5px; color:var(--ink-soft);">No receipts in this range yet.</p>';
   } else {
-    const catRangeTotal = sortedCats.reduce((s,[,amt])=> s+amt, 0);
-    // "yearly" tab spans a trailing 5-year window (60 months); every other tab is
-    // scoped to a single calendar year (12 months) regardless of which sub-period
-    // (monthly/quarterly/halfyear) is selected, since the category totals above are
-    // always computed across the full year, not just the visible buckets.
-    const monthsInRange = analysisPeriod==='yearly' ? 60 : 12;
-    sortedCats.forEach(([cat, amt])=>{
-      const pct = catRangeTotal>0 ? Math.round((amt/catRangeTotal)*100) : 0;
-      const avgPerMonth = Math.round(amt / monthsInRange);
+    snapshot.categories.forEach(({category:cat, amount:amt, pct, avgPerMonth})=>{
       const row = document.createElement('div');
       row.className = 'acat-row';
       row.style.cursor = 'pointer';
@@ -559,15 +601,61 @@ function renderAnalysisPage(){
       row.onclick = ()=>{
         // jump into the filtered receipt list for this category — also switch the
         // active folder tab to match whatever this analysis was scoped to, so the
-        // filtered results aren't silently narrower/wider than what was just shown
+        // filtered results aren't silently narrower/wider than what was just shown.
+        // dateFrom/dateTo pin the filter to the same year/range being viewed here,
+        // so e.g. viewing 2025 and tapping a category doesn't leak in 2026 receipts.
         if(analysisFolder !== '__all__') activeFolderId = analysisFolder;
-        activeFilters = { query:'', category:cat, dateFrom:'', dateTo:'' };
+        activeFilters = { query:'', category:cat, dateFrom:snapshot.rangeDateFrom, dateTo:snapshot.rangeDateTo };
         closeAnalysisPage();
         renderAll();
         showToast(`Showing ${cat} receipts`);
       };
       catContainer.appendChild(row);
     });
+  }
+
+  // ---- Top establishments ----
+  const estContainer = document.getElementById('analysisEstablishmentBreakdown');
+  if(estContainer){
+    estContainer.innerHTML = '';
+    if(snapshot.establishments.length===0){
+      estContainer.innerHTML = '<p style="font-size:12.5px; color:var(--ink-soft);">No receipts in this range yet.</p>';
+    } else {
+      snapshot.establishments.forEach(({name, amount, count})=>{
+        const row = document.createElement('div');
+        row.className = 'acat-row';
+        row.style.cursor = 'pointer';
+        row.innerHTML = `
+          <div class="acat-name">${escapeHtml(name)} <span style="color:var(--ink-soft); font-weight:400;">×${count}</span></div>
+          <div class="acat-amount">$${amount.toFixed(2)}</div>
+        `;
+        row.onclick = ()=>{
+          if(analysisFolder !== '__all__') activeFolderId = analysisFolder;
+          // matches on establishment name via the existing text-search filter — same
+          // substring-match behaviour as the manual search panel, scoped to this range
+          activeFilters = { query:name==='Unknown' ? '' : name, category:'', dateFrom:snapshot.rangeDateFrom, dateTo:snapshot.rangeDateTo };
+          closeAnalysisPage();
+          renderAll();
+          showToast(`Showing receipts matching "${name}"`);
+        };
+        estContainer.appendChild(row);
+      });
+    }
+  }
+
+  // ---- Essential vs discretionary ----
+  const essContainer = document.getElementById('analysisEssentialSplit');
+  if(essContainer){
+    essContainer.innerHTML = `
+      <div class="acat-row">
+        <div class="acat-name"><span class="acat-dot" style="background:#4E6B58"></span>Essential <span style="color:var(--ink-soft); font-weight:400;">(Groceries, Fuel, Utilities, Rent, Health)</span></div>
+        <div class="acat-amount">$${snapshot.essential.total.toFixed(2)} <span style="color:var(--ink-soft); font-weight:400;">(${snapshot.essential.pct}%)</span></div>
+      </div>
+      <div class="acat-row">
+        <div class="acat-name"><span class="acat-dot" style="background:#C48A3F"></span>Discretionary <span style="color:var(--ink-soft); font-weight:400;">(everything else)</span></div>
+        <div class="acat-amount">$${snapshot.discretionary.total.toFixed(2)} <span style="color:var(--ink-soft); font-weight:400;">(${snapshot.discretionary.pct}%)</span></div>
+      </div>
+    `;
   }
 }
 

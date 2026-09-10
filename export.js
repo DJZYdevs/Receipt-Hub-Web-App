@@ -291,3 +291,114 @@ document.getElementById('exportRangePreset').addEventListener('change', (e)=>{
 
 document.getElementById('btnRunExport').onclick = ()=>{ runExport().catch(err=>{ console.error(err); showToast('Export failed — see console for details'); }); };
 
+/* ============================================================
+   FINANCIAL SNAPSHOT PDF — answers the same preset questions shown
+   in the Analysis page (category breakdown, top establishments,
+   essential vs discretionary), as one branded, shareable PDF.
+   Built on computeAnalysisSnapshot() (dashboard.js) — same source
+   of truth as the on-screen Analysis view, so the two can't drift.
+   ============================================================ */
+function buildFinancialSnapshotPdf(snapshot){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  function drawHeader(){
+    doc.setFontSize(16);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(31, 42, 36);
+    doc.text('LEDGR', pageWidth - 40, 32, { align:'right' });
+    doc.setFontSize(7);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(78, 107, 88);
+    doc.text('BY ENGINEER OF THINGS', pageWidth - 40, 40, { align:'right' });
+    doc.setTextColor(0, 0, 0);
+  }
+
+  drawHeader();
+  doc.setFontSize(18);
+  doc.setFont(undefined, 'bold');
+  doc.text('Financial snapshot', 40, 46);
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'normal');
+  doc.text(`${snapshot.rangeLabel}  ·  ${snapshot.folderLabel}`, 40, 62);
+  doc.setFontSize(9);
+  doc.setTextColor(90,90,90);
+  doc.text(`Generated ${new Date().toLocaleString()}`, 40, 76);
+  doc.setTextColor(0,0,0);
+
+  doc.setFontSize(11);
+  doc.setFont(undefined, 'bold');
+  doc.text('Total spend', 40, 102);
+  doc.setFontSize(20);
+  doc.text(`$${snapshot.rangeTotal.toFixed(2)}`, 40, 124);
+  doc.setFont(undefined, 'normal');
+  doc.setFontSize(10);
+  doc.text(`~$${Math.round(snapshot.rangeTotal/snapshot.monthsInRange)}/month average`, 40, 140);
+
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(11);
+  doc.text('Essential vs discretionary', 40, 166);
+  doc.autoTable({
+    startY: 173,
+    head: [['', 'Amount', '% of total']],
+    body: [
+      ['Essential (Groceries, Fuel, Utilities, Rent, Health)', `$${snapshot.essential.total.toFixed(2)}`, `${snapshot.essential.pct}%`],
+      ['Discretionary (everything else)', `$${snapshot.discretionary.total.toFixed(2)}`, `${snapshot.discretionary.pct}%`],
+    ],
+    styles: { fontSize:9, cellPadding:5 },
+    headStyles: { fillColor:[122,148,130], textColor:255, fontStyle:'bold' },
+    margin:{ left:40, right:40 },
+  });
+
+  let y = doc.lastAutoTable.finalY + 24;
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(11);
+  doc.text('By category', 40, y);
+  doc.autoTable({
+    startY: y+7,
+    head: [['Category', 'Amount', '% of total', 'Avg/month']],
+    body: snapshot.categories.map(c=> [c.category, `$${c.amount.toFixed(2)}`, `${c.pct}%`, `$${c.avgPerMonth}`]),
+    styles: { fontSize:9, cellPadding:5 },
+    headStyles: { fillColor:[122,148,130], textColor:255, fontStyle:'bold' },
+    columnStyles: { 1:{halign:'right'}, 2:{halign:'right'}, 3:{halign:'right'} },
+    margin:{ left:40, right:40 },
+  });
+
+  y = doc.lastAutoTable.finalY + 24;
+  if(y > 700){ doc.addPage(); drawHeader(); y = 60; }
+  doc.setFont(undefined, 'bold');
+  doc.setFontSize(11);
+  doc.text('Top establishments', 40, y);
+  doc.autoTable({
+    startY: y+7,
+    head: [['Establishment', 'Visits', 'Amount']],
+    body: snapshot.establishments.map(e=> [e.name, String(e.count), `$${e.amount.toFixed(2)}`]),
+    styles: { fontSize:9, cellPadding:5 },
+    headStyles: { fillColor:[122,148,130], textColor:255, fontStyle:'bold' },
+    columnStyles: { 1:{halign:'right'}, 2:{halign:'right'} },
+    margin:{ left:40, right:40 },
+  });
+
+  return doc;
+}
+
+async function runFinancialSnapshotExport(){
+  if(typeof computeAnalysisSnapshot !== 'function'){
+    showToast('Analysis data not available yet');
+    return;
+  }
+  const snapshot = computeAnalysisSnapshot();
+  if(snapshot.rangeReceipts.length===0){
+    showToast('No receipts in this range yet');
+    return;
+  }
+  const doc = buildFinancialSnapshotPdf(snapshot);
+  const stamp = new Date().toISOString().slice(0,10);
+  doc.save(`ledgr-financial-snapshot-${stamp}.pdf`);
+  showToast('Snapshot PDF saved');
+}
+
+document.getElementById('btnGenerateSnapshotPdf').onclick = ()=>{
+  runFinancialSnapshotExport().catch(err=>{ console.error(err); showToast('Snapshot export failed — see console for details'); });
+};
