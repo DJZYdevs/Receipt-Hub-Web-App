@@ -38,7 +38,7 @@
    nothing — the rest of the app is unaffected.
    ============================================================ */
 
-const GOOGLE_CLIENT_ID = '259379633108-o2p7ntpli67svraqc1p7rig6ju9o94di.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = 'PASTE_YOUR_CLIENT_ID_HERE.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const BACKUP_FOLDER_NAME = 'Ledgr Backups';
 
@@ -178,7 +178,10 @@ async function runManualBackup(){
     showToast('Drive backup not set up yet — see backup.js for setup steps');
     return;
   }
-  showToast('Backing up…');
+  const btn = document.getElementById('btnBackupNow');
+  const originalLabel = btn.innerText;
+  btn.disabled = true;
+  btn.innerText = 'Backing up…';
   try{
     await uploadBackupToDrive(true); // interactive — real consent prompt if needed
     showToast('Backup saved to Drive ✓');
@@ -188,6 +191,9 @@ async function runManualBackup(){
     localStorage.setItem(userKey('last_backup_error'), String(err.message || err));
     renderBackupStatus();
     showToast('Backup failed — check console');
+  }finally{
+    btn.disabled = false;
+    btn.innerText = originalLabel;
   }
 }
 
