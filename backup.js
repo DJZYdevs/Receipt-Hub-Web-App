@@ -9,6 +9,19 @@
    quietly. Now a failure sets a visible, sticky warning until the
    user reconnects — it never fails silently again.
 
+   v3 change (this session): two related bugs fixed.
+   1. listDriveBackups() previously returned every file in the shared
+      "Ledgr Backups" Drive folder with no filter on which app-user
+      the backup belonged to — so switching app users but staying on
+      the same Google Drive account showed one user's backups to the
+      other. Filenames were already user-tagged (ledgr-backup-<user>-
+      ...json) but nothing read that back to filter. Now filtered by
+      filename prefix, both in the Drive query and again client-side.
+   2. maybeShowAutoRestoreBanner() only ever set the banner to
+      display:flex, never display:none — so switching from an empty
+      account to one with data left a stale "no receipts found"
+      banner on screen. Now explicitly hides it when data is present.
+
    Why this exists: the app's built-in Export only ever wrote out
    `receipts` (from IndexedDB). category_usage and known_merchants
    live separately in localStorage and were never included — that
@@ -148,6 +161,28 @@ async function uploadBackupToDrive(interactive){
 
 function todayStamp(){ return new Date().toISOString().slice(0, 10); }
 
+/* ---------- Dirty-state tracking ("skip backup if nothing changed") ----------
+   Wraps the existing persistState() (defined earlier in state.js) rather than
+   duplicating its logic — every real state mutation already funnels through
+   it (see the handoff notes on exitSelectMode()/renderAll()), so this stays
+   accurate without touching state.js. A reassignment, not a redeclaration —
+   safe under the classic-script shared-global-scope rule. */
+if(typeof persistState === 'function'){
+  const _persistState = persistState;
+  persistState = function(...args){
+    localStorage.setItem(userKey('data_changed_at'), new Date().toISOString());
+    return _persistState.apply(this, args);
+  };
+}
+
+function hasUnbackedUpChanges(){
+  const changedAt = localStorage.getItem(userKey('data_changed_at'));
+  const lastBackupAt = localStorage.getItem(userKey('last_backup_at'));
+  if(!changedAt) return false;      // nothing has mutated on this device yet
+  if(!lastBackupAt) return true;    // never backed up — worth doing regardless
+  return new Date(changedAt) > new Date(lastBackupAt);
+}
+
 // Best-effort, but NEVER silent on failure anymore. Called on login, on app
 // resume (visibilitychange), and right after import.
 async function maybeAutoBackup(reason){
@@ -173,27 +208,60 @@ async function maybeAutoBackup(reason){
   }
 }
 
+/* ---------- Dismissible backup-complete banner (self-contained,
+   independent of the shared showToast — stays until the user closes
+   it rather than auto-fading, so a manual backup result is harder
+   to miss) ---------- */
+function showBackupCompleteBanner(message, isError){
+  let el = document.getElementById('backupCompleteBanner');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'backupCompleteBanner';
+    el.style.cssText = 'position:fixed; left:16px; right:16px; bottom:24px; z-index:9999; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; border-radius:12px; box-shadow:0 4px 16px rgba(0,0,0,0.18); font-size:13px; font-weight:700;';
+    const text = document.createElement('span');
+    text.id = 'backupCompleteBannerText';
+    const closeBtn = document.createElement('button');
+    closeBtn.innerText = '✕';
+    closeBtn.setAttribute('aria-label', 'Dismiss');
+    closeBtn.style.cssText = 'background:none; border:none; font-size:15px; line-height:1; cursor:pointer; color:inherit; padding:2px 4px;';
+    closeBtn.onclick = ()=> el.remove();
+    el.appendChild(text);
+    el.appendChild(closeBtn);
+    document.body.appendChild(el);
+  }
+  el.style.background = isError ? '#F4E3DF' : '#E4EEE2';
+  el.style.color = isError ? '#8A3A2C' : 'var(--sage-deep, #2F5233)';
+  document.getElementById('backupCompleteBannerText').innerText = message;
+}
+
 async function runManualBackup(){
   if(!driveConfigured()){
     showToast('Drive backup not set up yet — see backup.js for setup steps');
     return;
   }
+  if(!hasUnbackedUpChanges()){
+    const lastBackupAt = localStorage.getItem(userKey('last_backup_at'));
+    const when = lastBackupAt ? new Date(lastBackupAt).toLocaleString() : 'never';
+    if(!confirm(`No changes since your last backup (${when}). Back up anyway?`)) return;
+  }
   const btn = document.getElementById('btnBackupNow');
   const originalLabel = btn.innerText;
   btn.disabled = true;
   btn.innerText = 'Backing up…';
+  btn.style.opacity = '0.6';
   try{
     await uploadBackupToDrive(true); // interactive — real consent prompt if needed
-    showToast('Backup saved to Drive ✓');
+    showBackupCompleteBanner('Backup saved to Drive ✓', false);
   }catch(err){
     console.error(err);
     localStorage.setItem(userKey('last_backup_failed_at'), new Date().toISOString());
     localStorage.setItem(userKey('last_backup_error'), String(err.message || err));
     renderBackupStatus();
-    showToast('Backup failed — check console');
+    showBackupCompleteBanner('Backup failed — check console', true);
   }finally{
     btn.disabled = false;
     btn.innerText = originalLabel;
+    btn.style.opacity = '1';
   }
 }
 
@@ -224,12 +292,17 @@ function renderBackupStatus(){
 async function listDriveBackups(){
   const token = await getDriveAccessToken(true);
   const folderId = await findOrCreateBackupFolder(token);
-  const q = encodeURIComponent(`'${folderId}' in parents and trashed=false`);
+  // Filtered to the current app-user's own backups only (v3 fix — previously
+  // returned every file in the shared folder regardless of which app-user it
+  // belonged to). Prefix filter both in the Drive query and again client-side,
+  // since Drive's `contains` matches anywhere in the name, not just the start.
+  const prefix = `ledgr-backup-${currentUser}-`;
+  const q = encodeURIComponent(`'${folderId}' in parents and trashed=false and name contains '${prefix}'`);
   const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&fields=files(id,name,createdTime)`, {
     headers:{ Authorization:`Bearer ${token}` },
   });
   const data = await res.json();
-  return data.files || [];
+  return (data.files || []).filter(f=> f.name.startsWith(prefix));
 }
 
 async function restoreFromDriveBackup(fileId){
@@ -334,11 +407,13 @@ async function checkLocalDataEmpty(){
 
 async function maybeShowAutoRestoreBanner(){
   if(!driveConfigured()) return; // nothing to offer if Drive isn't set up
-  const isEmpty = await checkLocalDataEmpty();
-  if(!isEmpty) return; // normal case — this browser already has data, nothing to do
   const banner = document.getElementById('autoRestoreBanner');
   if(!banner) return;
-  banner.style.display = 'flex';
+  // v3 fix: explicitly hide on the "has data" branch too — previously this
+  // only ever set display:flex and never display:none, so switching from an
+  // empty app-user to one with data left a stale banner on screen.
+  const isEmpty = await checkLocalDataEmpty();
+  banner.style.display = isEmpty ? 'flex' : 'none';
 }
 
 async function handleAutoRestoreCheck(){
